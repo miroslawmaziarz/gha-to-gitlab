@@ -19,13 +19,20 @@
    [:gap-count nat-int?]
    [:sets {:optional true} [:vector :keyword]]])
 
+(def cache-key-files-limit
+  "The most files a Job cache key can depend on (`cache:key:files`), as
+  current GitLab allows."
+  10)
+
 (def Cache
-  "One Job cache: the paths it holds and the key it is stored under."
+  "One Job cache: the paths it holds and the key it is stored under, in
+  GitLab's shape (ADR-0004)."
   [:map {:closed true}
-   ;; a fixed key, or one GitLab derives from up to two files' contents
+   ;; a fixed key, or one GitLab derives from the contents of up to
+   ;; `cache-key-files-limit` files
    [:key [:or [:string {:min 1}]
           [:map {:closed true}
-           [:files [:vector {:min 1 :max 2} :string]]
+           [:files [:vector {:min 1 :max cache-key-files-limit} :string]]
            [:prefix {:optional true} [:string {:min 1}]]]]]
    [:paths [:vector {:min 1} :string]]
    ;; restore only (pull) or save only (push); missing: both
@@ -34,7 +41,8 @@
    [:when {:optional true} [:enum "always"]]])
 
 (def Artifacts
-  "The Job's artifacts: the paths kept after the Job, minus `:exclude`."
+  "The Job's artifacts: the paths kept after the Job, minus `:exclude`, in
+  GitLab's shape (ADR-0004)."
   [:map {:closed true}
    [:name {:optional true} [:string {:min 1}]]
    [:paths [:vector {:min 1} :string]]

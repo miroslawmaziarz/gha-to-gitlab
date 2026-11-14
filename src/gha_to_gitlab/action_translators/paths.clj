@@ -9,6 +9,11 @@
   [value]
   (into [] (comp (map str/trim) (remove str/blank?)) (str/split-lines (str value))))
 
+(defn exclusion?
+  "True when `path` is a `!` line, which excludes what it matches."
+  [path]
+  (str/starts-with? path "!"))
+
 (defn expression?
   "True when `path` holds a GitHub expression, only known when the Workflow runs."
   [path]

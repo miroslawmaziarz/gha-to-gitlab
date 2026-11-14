@@ -2,12 +2,14 @@
   "Action Translator for `actions/upload-artifact`: the Step becomes the
   Job's artifacts. `path` lines become `paths` (lines starting with `!`
   become `exclude`), `name` the artifacts' name and `retention-days` their
-  `expire_in`. GitLab keeps one artifacts archive per Job, so a second
+  `expire_in`. From v4.4 upload-artifact leaves hidden files out unless
+  `include-hidden-files` is true, and GitLab keeps them, so they get
+  `exclude` patterns. GitLab keeps one artifacts archive per Job, so a second
   upload in a Job is a Gap (see `gha-to-gitlab.github`)."
   (:require [clojure.string :as str]
             [gha-to-gitlab.action-translator :as action-translator]
-            [gha-to-gitlab.action-translators.paths :as paths]
-            [gha-to-gitlab.action-translators.setup :as setup]))
+            [gha-to-gitlab.action-translators.inputs :as inputs]
+            [gha-to-gitlab.action-translators.paths :as paths]))
 
 (defn- path-problem
   "Why GitLab can't keep `path` as an artifact, as a Gap hint; nil when it can."
@@ -38,39 +40,55 @@
                         :hint "GitLab only warns when an artifacts path matches no files; add a script line that fails when they are missing by hand"}
    "compression-level" {:honoured any?}
    "overwrite" {:honoured any?} ; each GitLab Job has its own artifacts
-   "include-hidden-files" {:honoured #{"true"}
-                           :hint "GitLab keeps hidden files too; add `exclude` patterns to the Job artifacts for any that must not be kept by hand"}})
+   "include-hidden-files" {:honoured any?}}) ; see `hidden-file-excludes`
+
+(def ^:private hidden-file-excludes
+  "`exclude` patterns for hidden files and directories (names starting with
+  `.`) at any depth."
+  ["**/.*" "**/.*/**"])
+
+(defn- leaves-out-hidden-files?
+  "True when the upload leaves hidden files out: from v4.4 on (and for a
+  version this can't read, such as a commit SHA, taken as the latest)
+  unless `include-hidden-files` is true. GitLab keeps them, so they need
+  `exclude` patterns."
+  [uses with]
+  (let [[_ major minor] (re-find #"@v(\d+)(?:\.(\d+))?" uses)
+        major (some-> major parse-long)
+        minor (some-> minor parse-long)]
+    (and (not= "true" (str/lower-case (str (get with "include-hidden-files"))))
+         (or (nil? major) (< 4 major) (and (= 4 major) (or (nil? minor) (<= 4 minor)))))))
 
 (def ^:private default-hint
   "the Job artifacts have no equivalent; check the Job works without it")
 
 (defmethod action-translator/translate "actions/upload-artifact"
-  [{:keys [with]}]
+  [{:keys [uses with]}]
   (let [with (update-keys with name)
         lines (paths/lines (get with "path"))
-        line-path #(if (str/starts-with? % "!") (subs % 1) %)
-        ok (remove (comp path-problem line-path) lines)
-        includes (vec (remove #(str/starts-with? % "!") ok))
-        excludes (vec (keep #(when (str/starts-with? % "!") (subs % 1)) ok))
+        line-path #(if (paths/exclusion? %) (subs % 1) %)
+        convertible-lines (remove (comp path-problem line-path) lines)
+        includes (vec (remove paths/exclusion? convertible-lines))
+        hidden-excluded? (leaves-out-hidden-files? uses with)
+        excludes (cond-> (vec (keep #(when (paths/exclusion? %) (subs % 1)) convertible-lines))
+                   hidden-excluded? (into hidden-file-excludes))
         artifact-name (get with "name")
         name-hint (when (and artifact-name (paths/expression? (str artifact-name)))
                     "the name is only known when the Workflow runs; write the Job artifacts' name (it may use GitLab Variables) by hand")
         {:keys [expire-in] days-hint :hint} (some-> (get with "retention-days") expire-in)
         gaps (concat
-              (when name-hint [(setup/input-gap "name" artifact-name name-hint)])
+              (when name-hint [(inputs/input-gap "name" artifact-name name-hint)])
               (for [line lines :let [hint (path-problem (line-path line))] :when hint]
-                (setup/input-gap "path" line hint))
+                (inputs/input-gap "path" line hint))
               (when (empty? lines)
                 [{:input "path" :message "has no `path` input; add the Job artifacts by hand."}])
-              (when days-hint [(setup/input-gap "retention-days" (get with "retention-days") days-hint)])
-              (for [[input v] with
-                    :when (not (#{"path" "name" "retention-days"} input))
-                    :let [honoured? (get-in inputs [input :honoured])]
-                    :when (not (and honoured? (honoured? (str v))))]
-                (setup/input-gap input v (get-in inputs [input :hint] default-hint))))]
+              (when days-hint [(inputs/input-gap "retention-days" (get with "retention-days") days-hint)])
+              (inputs/unhonoured-gaps with inputs #{"path" "name" "retention-days"} default-hint))]
     (cond-> {:script []
              :outcome (if (seq includes)
-                        "converted to the Job artifacts"
+                        (str "converted to the Job artifacts"
+                             (when hidden-excluded?
+                               " (hidden files left out with `exclude` patterns, as upload-artifact v4.4 and later does)"))
                         "dropped; add the Job artifacts by hand (see Gaps)")
              :gaps (vec gaps)}
       (seq includes)

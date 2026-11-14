@@ -10,16 +10,9 @@
   file (or `cache-dependency-path`), plus the Variables that point the tool
   at it (see `package-cache`)."
   (:require [clojure.string :as str]
+            [gha-to-gitlab.ci-model :as ci-model]
+            [gha-to-gitlab.action-translators.inputs :as inputs]
             [gha-to-gitlab.action-translators.paths :as paths]))
-
-(defn one-line
-  "`value` as text on one line, so it stays inside one Migration Report bullet."
-  [value]
-  (str/join " " (str/split (str/trim (str value)) #"\s*\n\s*")))
-
-(defn input-gap [input value hint]
-  {:input input
-   :message (str "input `" input ": " (one-line value) "` has no GitLab equivalent: " hint ".")})
 
 (def common-inputs
   "Inputs several setup Actions share: `:honoured` is a predicate on the
@@ -48,7 +41,7 @@
   "The Gap for a version input whose value is not one exact version; `spec`
   is the `translate-setup` spec."
   [{:keys [version-input example]} version]
-  (input-gap version-input version
+  (inputs/input-gap version-input version
              (if (str/includes? (str version) "${{")
                (str "the version is only known when the Workflow runs; resolve it and "
                     (set-image-by-hand example))
@@ -81,27 +74,28 @@
   (let [files (paths/lines value)]
     (cond
       (some paths/expression? files) {:hint "the files are only known when the Workflow runs; key the Job cache on them by hand"}
-      (some #(str/starts-with? % "!") files) {:hint "a GitLab cache key can't exclude files; key the Job cache on the files by hand"}
-      (< 2 (count files)) {:hint "a GitLab cache key can depend on at most two files; key the Job cache on them by hand"}
+      (some paths/exclusion? files) {:hint "a GitLab cache key can't exclude files; key the Job cache on the files by hand"}
+      (< ci-model/cache-key-files-limit (count files))
+      {:hint (str "a GitLab cache key can depend on at most " ci-model/cache-key-files-limit
+                  " files; key the Job cache on them by hand")}
       :else {:files files})))
 
 (defn- package-cache
   "The Job cache for the `cache` input: `{:manager m :job-settings {:cache [..]
-  :variables {..}}}` from the spec's `:caches` table (per package manager:
-  the lock `:files` it is keyed on, the `:paths` inside the project it
-  holds, and the `:variables` that point the tool at them), or `{:gaps
+  :variables {..}}}` from the spec's `:caches`, the known package managers
+  (see `gha-to-gitlab.action-translators.package-caches`), or `{:gaps
   [..]}`; nil without a `cache` input."
   [{:keys [caches]} with]
   (when-let [manager (some-> (get with "cache") str str/trim not-empty)]
-    (let [{:keys [files paths variables] :as rule} (get caches (str/lower-case manager))
+    (let [{:keys [files paths variables] :as known} (get caches (str/lower-case manager))
           dependency-path (get with "cache-dependency-path")
           {dep-files :files dep-hint :hint} (when dependency-path (dependency-files dependency-path))]
       (cond
-        (nil? rule) {:gaps [(input-gap "cache" manager
-                                       (str "no Job cache rule for this package manager (rules exist for "
+        (nil? known) {:gaps [(inputs/input-gap "cache" manager
+                                       (str "not one of the known package managers ("
                                             (str/join ", " (map #(str "`" % "`") (sort (keys caches))))
                                             "); " by-hand-cache-hint))]}
-        dep-hint {:gaps [(input-gap "cache-dependency-path" dependency-path dep-hint)]}
+        dep-hint {:gaps [(inputs/input-gap "cache-dependency-path" dependency-path dep-hint)]}
         :else {:manager (str/lower-case manager)
                :job-settings {:cache [{:key {:files (or dep-files files) :prefix (str/lower-case manager)}
                                        :paths paths}]
@@ -130,16 +124,14 @@
         (cond
           (and (number? version) (not (integer? version))) {:gaps [(unquoted-number-gap spec version)]}
           (some? version) (image spec with version)
-          file {:gaps [(input-gap version-file file
+          file {:gaps [(inputs/input-gap version-file file
                                   (str "read the version from that file and " (set-image-by-hand example)))]}
           default-image {:image default-image}
           :else {:gaps [(missing-input-gap version-input example)]})
         {:keys [manager job-settings] cache-gaps :gaps} (package-cache spec with)
-        input-gaps (for [[input v] with
-                         :when (not (#{version-input version-file "cache" "cache-dependency-path"} input))
-                         :let [honoured? (get-in inputs [input :honoured])]
-                         :when (not (and honoured? (honoured? (str v))))]
-                     (input-gap input v (get-in inputs [input :hint] default-hint)))]
+        input-gaps (inputs/unhonoured-gaps with inputs
+                                           #{version-input version-file "cache" "cache-dependency-path"}
+                                           default-hint)]
     (cond-> {:script []
              :outcome (str (if image-name
                              (str "converted to the Job image `" image-name "`"

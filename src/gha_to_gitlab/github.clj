@@ -112,8 +112,15 @@
                  "` (Action `" action "`) already set it to `" (yaml-ish kept) "`, which the Job keeps; "
                  (get conflict-hints setting "settle on one value by hand."))})
 
+(defn- ordinal
+  "`n` as an English ordinal: 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st, ..."
+  [n]
+  (str n (if (#{11 12 13} (mod n 100))
+           "th"
+           (case (mod n 10) 1 "st" 2 "nd" 3 "rd" "th"))))
+
 (defn- too-many-gap [setting limit]
-  {:message (str "adds a " (inc limit) "th entry to the Job's `" (name setting) "`, but GitLab allows at most "
+  {:message (str "adds the " (ordinal (inc limit)) " entry to the Job's `" (name setting) "`, but GitLab allows at most "
                  limit "; the Job leaves it out, so merge it into another entry by hand.")})
 
 (defn- add-setting

@@ -142,7 +142,7 @@
                                        "          key: ${{ runner.os }}-next-${{ hashFiles('package-lock.json') }}\n"
                                        "      - run: npm ci && npm run build\n"
                                        "      - name: Upload\n        uses: actions/upload-artifact@v4\n        with:\n"
-                                       "          name: dist\n          path: dist/\n          retention-days: 7\n"))
+                                       "          name: dist\n          path: dist/\n          retention-days: 7\n          include-hidden-files: true\n"))
                      :output-dir out})
     (testing "the setup Action's cache, actions/cache and actions/upload-artifact become the Job's variables, caches and artifacts"
       (is (= (str "web:\n"

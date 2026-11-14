@@ -1,6 +1,7 @@
 (ns gha-to-gitlab.action-translators.setup-cache-test
   "The `cache` and `cache-dependency-path` inputs of the setup Actions."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [gha-to-gitlab.github :as github]))
 
 (defn- convert [steps-yaml]
@@ -33,7 +34,9 @@
               {:cache [{:key {:files ["**/pom.xml"] :prefix "maven"} :paths [".m2/repository"]}]
                :variables {"MAVEN_OPTS" "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"}}]
              ["setup-java@v4" "distribution: temurin\n          java-version: 21" "gradle"
-              {:cache [{:key {:files ["**/*.gradle*" "**/gradle-wrapper.properties"] :prefix "gradle"}
+              {:cache [{:key {:files ["**/*.gradle*" "**/gradle-wrapper.properties" "buildSrc/**/Versions.kt"
+                                      "buildSrc/**/Dependencies.kt" "gradle/*.versions.toml" "**/versions.properties"]
+                              :prefix "gradle"}
                         :paths [".gradle/caches" ".gradle/wrapper"]}]
                :variables {"GRADLE_USER_HOME" "$CI_PROJECT_DIR/.gradle"}}]]]
       (let [model (convert (str "      - uses: actions/" action "\n        with:\n          " version-input
@@ -51,8 +54,8 @@
            (-> (convert (str "      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n          cache: npm\n"
                              "          cache-dependency-path: |\n            web/package-lock.json\n            api/package-lock.json\n"))
                settings :cache first :key))))
-  (testing "more than two files, an expression or an exclusion is a Gap naming it, and no cache is added"
-    (doseq [paths ["a.lock\n            b.lock\n            c.lock" "${{ env.LOCK }}" "**/x.lock\n            !vendor/**"]]
+  (testing "more than 10 files, an expression or an exclusion is a Gap naming it, and no cache is added"
+    (doseq [paths [(str/join "\n            " (map #(str "f" % ".lock") (range 11))) "${{ env.LOCK }}" "**/x.lock\n            !vendor/**"]]
       (let [model (convert (str "      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n          cache: npm\n"
                                 "          cache-dependency-path: |\n            " paths "\n"))]
         (is (nil? (:cache (settings model))) paths)
