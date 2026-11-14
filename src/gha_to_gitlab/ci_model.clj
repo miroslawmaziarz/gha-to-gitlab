@@ -7,6 +7,9 @@
 (def Job
   [:map {:closed true}
    [:id [:string {:min 1}]]
+   [:runs-on {:optional true} :string]
+   [:image {:optional true} [:string {:min 1}]]
+   [:tags {:optional true} [:vector :string]]
    [:script [:vector {:min 1} :string]]])
 
 (def Gap

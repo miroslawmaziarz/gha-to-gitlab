@@ -3,14 +3,26 @@
   (:require [clojure.string :as str]
             [gha-to-gitlab.gitlab :as gitlab]))
 
-(defn- job-line [{:keys [id script]}]
+(defn- runner-part
+  "Which Runner Mapping a Job used, or that it had none."
+  [{:keys [runs-on image tags]}]
+  (cond
+    (nil? runs-on) ""
+    (nil? image) (str "; runs on `" runs-on "` → no Runner Mapping (see Gaps)")
+    :else (str "; runs on `" runs-on "` → image `" image "`, "
+               (if (seq tags)
+                 (str "tags " (str/join ", " (map #(str "`" % "`") tags)))
+                 "no tags"))))
+
+(defn- job-line [{:keys [id script] :as job}]
   (let [target-name (gitlab/job-name id)
         n (count script)]
-    (format "- `%s`%s: %d script line%s"
+    (format "- `%s`%s: %d script line%s%s"
             id
             (if (= id target-name) "" (str " → `" target-name "` (renamed: `" id "` is a GitLab keyword)"))
             n
-            (if (= 1 n) "" "s"))))
+            (if (= 1 n) "" "s")
+            (runner-part job))))
 
 (defn- gap-line [{:keys [message]}]
   (str "- " message))
