@@ -2,12 +2,8 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [gha-to-gitlab.cli :as cli])
-  (:import (java.nio.file Files)
-           (java.nio.file.attribute FileAttribute)))
-
-(defn- temp-dir []
-  (str (Files/createTempDirectory "cli" (make-array FileAttribute 0))))
+            [gha-to-gitlab.test-support :refer [temp-dir]]
+            [gha-to-gitlab.cli :as cli]))
 
 (deftest run-with-clone-and-output-dir-test
   (testing "a clone path and an output directory run a Migration Run and exit 0"

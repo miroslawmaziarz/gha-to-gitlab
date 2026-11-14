@@ -38,6 +38,8 @@ clojure -M:run test/fixtures/plain-workflow /tmp/migration-out
 
 Current limits: the clone must contain exactly one Workflow under `.github/workflows/`, and every Step must be a `run:` Step.
 
+A GitHub Job whose id is a GitLab global keyword (such as `image`, `variables` or `workflow`) is renamed with a `_job` suffix, and the Migration Report lists the rename.
+
 ## Development
 
 ```sh

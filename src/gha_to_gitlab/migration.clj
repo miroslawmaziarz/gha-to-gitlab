@@ -16,7 +16,7 @@
 (defn- single-workflow [source-dir]
   (let [files (workflow-files source-dir)]
     (when (not= 1 (count files))
-      (throw (ex-info (str "Expected exactly one Workflow in " (io/file source-dir workflows-dir)
+      (throw (ex-info (str "Expected exactly one Workflow in " source-dir "/" workflows-dir
                            ", found " (count files))
                       {:source-dir source-dir :workflows (mapv str files)})))
     (first files)))
@@ -28,10 +28,10 @@
   [{:keys [source-dir output-dir]}]
   (let [workflow (single-workflow source-dir)
         model (github/workflow->ci-model (slurp workflow))
-        ci-file (io/file output-dir ".gitlab-ci.yml")
+        ci-file (io/file output-dir gitlab/ci-file-name)
         report-file (io/file output-dir "MIGRATION_REPORT.md")]
     (.mkdirs (io/file output-dir))
     (spit ci-file (gitlab/ci-model->gitlab-ci-yaml model))
     (spit report-file (report/render {:workflow-path (str workflows-dir "/" (.getName workflow))
                                       :model model}))
-    {:gitlab-ci (str ci-file) :report (str report-file)}))
+    {:gitlab-ci-path (str ci-file) :report-path (str report-file)}))

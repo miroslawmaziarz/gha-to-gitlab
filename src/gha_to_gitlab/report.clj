@@ -1,9 +1,16 @@
 (ns gha-to-gitlab.report
   "Renders the Migration Report: what a Migration Run converted and every Gap."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [gha-to-gitlab.gitlab :as gitlab]))
 
 (defn- job-line [{:keys [id script]}]
-  (format "- `%s`: %d script line%s" id (count script) (if (= 1 (count script)) "" "s")))
+  (let [target-name (gitlab/job-name id)
+        n (count script)]
+    (format "- `%s`%s: %d script line%s"
+            id
+            (if (= id target-name) "" (str " → `" target-name "` (renamed: `" id "` is a GitLab keyword)"))
+            n
+            (if (= 1 n) "" "s"))))
 
 (defn- gap-line [{:keys [message]}]
   (str "- " message))
@@ -19,7 +26,7 @@
      ""
      "## Converted"
      ""
-     (str "Workflow `" workflow-path "` became `.gitlab-ci.yml` with these Jobs:")
+     (str "Workflow `" workflow-path "` became `" gitlab/ci-file-name "` with these Jobs:")
      ""]
     (map job-line (:jobs model))
     ["" "## Gaps" ""]

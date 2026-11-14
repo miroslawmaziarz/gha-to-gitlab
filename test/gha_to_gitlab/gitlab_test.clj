@@ -24,3 +24,15 @@
                gitlab/ci-model->gitlab-ci-yaml
                yaml/parse-string
                :j :script)))))
+
+(deftest reserved-keyword-job-test
+  (testing "a Job whose id is a GitLab global keyword is renamed so it stays a Job"
+    (is (= {:image_job {:script ["make image"]}
+            :variables_job {:script ["env"]}
+            :build {:script ["make"]}}
+           (-> {:jobs [{:id "image" :script ["make image"]}
+                       {:id "variables" :script ["env"]}
+                       {:id "build" :script ["make"]}]
+                :gaps []}
+               gitlab/ci-model->gitlab-ci-yaml
+               yaml/parse-string)))))
