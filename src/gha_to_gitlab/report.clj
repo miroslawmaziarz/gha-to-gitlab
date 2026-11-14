@@ -3,6 +3,8 @@
   (:require [clojure.string :as str]
             [gha-to-gitlab.gitlab :as gitlab]))
 
+(def file-name "MIGRATION_REPORT.md")
+
 (defn- job-line [{:keys [id script]}]
   (let [target-name (gitlab/job-name id)
         n (count script)]

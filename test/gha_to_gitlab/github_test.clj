@@ -1,5 +1,6 @@
 (ns gha-to-gitlab.github-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.java.shell :refer [sh]]
+            [clojure.test :refer [deftest is testing]]
             [gha-to-gitlab.github :as github]))
 
 (def two-job-workflow
@@ -56,6 +57,22 @@ jobs:
              (mapv #(select-keys % [:workflow :job :step :action]) (:gaps model))))
       (is (= "Workflow `.github/workflows/ci.yml`, Job `build`, Step `Publish`: Action `acme/publish@v2` has no Action Translator; replace its placeholder script line by hand."
              (-> model :gaps first :message))))))
+
+(deftest placeholder-quoting-test
+  (testing "the placeholder script line stays valid shell when the Action contains a single quote"
+    (let [line (-> (github/workflow->ci-model
+                    "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: \"./it's-local\"\n")
+                   :jobs first :script first)
+          {:keys [exit out]} (sh "bash" "-c" line)]
+      (is (= 0 exit))
+      (is (= "Gap: Action ./it's-local was not converted; see MIGRATION_REPORT.md\n" out)))))
+
+(deftest non-string-step-name-test
+  (testing "a Step whose name: is not a string is still named in its Gap"
+    (is (= "123"
+           (-> (github/workflow->ci-model
+                "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - name: 123\n        uses: acme/x@v1\n")
+               :gaps first :step)))))
 
 (deftest step-without-run-or-uses-test
   (testing "a Step with neither run: nor uses: is refused rather than silently dropped"

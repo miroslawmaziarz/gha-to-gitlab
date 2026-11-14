@@ -13,8 +13,8 @@
   no translator falls through to the default method, which returns nil, and
   the Migration Run records it as a Gap.
 
-  Translators live in their own namespaces; for the Migration Run to see
-  them, require those namespaces from `gha-to-gitlab.github`."
+  Each translator lives in its own namespace; add one require line for it
+  in `gha-to-gitlab.action-translators` so the Migration Run loads it."
   (:require [clojure.string :as str]))
 
 (defn action-name

@@ -1,16 +1,25 @@
 (ns gha-to-gitlab.github
   "Source side: reads a GitHub Actions Workflow into the CI Model."
   (:require [clj-yaml.core :as yaml]
+            [clojure.string :as str]
             [gha-to-gitlab.action-translator :as action-translator]
-            [gha-to-gitlab.ci-model :as ci-model]))
+            [gha-to-gitlab.action-translators]
+            [gha-to-gitlab.ci-model :as ci-model]
+            [gha-to-gitlab.report :as report]))
 
 (defn- step-label [step index]
-  (or (:name step) (:id step) (str "step " (inc index))))
+  (str (or (:name step) (:id step) (str "step " (inc index)))))
+
+(defn- shell-quote
+  "`s` as one single-quoted POSIX shell word."
+  [s]
+  (str "'" (str/replace s "'" "'\\''") "'"))
 
 (defn- unknown-action [workflow-path job-id step index]
   (let [action (:uses step)
         label (step-label step index)]
-    {:script [(str "echo 'Gap: Action " action " was not converted; see MIGRATION_REPORT.md'")]
+    {:script [(str "echo " (shell-quote (str "Gap: Action " action " was not converted; see "
+                                             report/file-name)))]
      :gap {:message (str "Workflow `" workflow-path "`, Job `" job-id "`, Step `" label
                          "`: Action `" action "` has no Action Translator;"
                          " replace its placeholder script line by hand.")

@@ -30,7 +30,7 @@
         workflow-path (str workflows-dir "/" (.getName workflow))
         model (github/workflow->ci-model (slurp workflow) {:workflow-path workflow-path})
         ci-file (io/file output-dir gitlab/ci-file-name)
-        report-file (io/file output-dir "MIGRATION_REPORT.md")]
+        report-file (io/file output-dir report/file-name)]
     (.mkdirs (io/file output-dir))
     (spit ci-file (gitlab/ci-model->gitlab-ci-yaml model))
     (spit report-file (report/render {:workflow-path workflow-path :model model}))
