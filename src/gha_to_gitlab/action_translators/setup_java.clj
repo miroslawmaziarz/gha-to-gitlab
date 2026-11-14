@@ -3,13 +3,15 @@
   of the requested `distribution` and `java-version` (see
   `gha-to-gitlab.action-translators.setup`). Both inputs are required, as
   they are on GitHub, so a missing one is a Gap; so is a distribution with
-  no image rule below."
+  no image template below. `1.N` means Java N; a version below the feature
+  release (`21.0.2`) uses the feature release's image plus a Gap, since not
+  every image publishes such tags."
   (:require [clojure.string :as str]
             [gha-to-gitlab.action-translator :as action-translator]
             [gha-to-gitlab.action-translators.setup :as setup]))
 
-(def ^:private images
-  "Per `distribution`: the JDK image for a version tag."
+(def ^:private image-templates
+  "Per `distribution`: the JDK image for a feature-release tag (`21`)."
   {"temurin" #(str "eclipse-temurin:" %)
    "zulu" #(str "azul/zulu-openjdk:" %)
    "corretto" #(str "amazoncorretto:" %)
@@ -19,21 +21,38 @@
 
 (def ^:private example "eclipse-temurin:21")
 
-(defn- java-image [with version]
+(defn- feature-release
+  "The Java feature release a version names, and whether the version was
+  more precise than that: `21` → [\"21\" false], `1.8` → [\"8\" false],
+  `17.x` → [\"17\" false], `21.0.2` → [\"21\" true]; nil for anything
+  else. Not every image publishes tags below the feature release, so the
+  image uses that tag only."
+  [version]
+  (when-let [v (setup/exact-version version)]
+    (let [[major & more] (str/split v #"\.")
+          [major more] (if (and (= "1" major) (seq more)) [(first more) (rest more)] [major more])]
+      [major (boolean (and (seq more) (not (str/includes? (str version) ".x"))))])))
+
+(defn- java-image [spec with version]
   (let [distribution (get with "distribution")
-        image-for (get images (some-> distribution str str/lower-case))
-        tag (setup/exact-version version)]
+        image-for (get image-templates (some-> distribution str str/lower-case))
+        [tag more-precise?] (feature-release version)]
     (cond
       (nil? distribution)
-      {:gaps [{:input "distribution"
-               :message (str "has no `distribution` input; set the Job's image (e.g. `" example "`) by hand.")}]}
+      {:gaps [(setup/missing-input-gap "distribution" example)]}
       (nil? image-for)
       {:gaps [(setup/input-gap "distribution" distribution
-                               (str "no image rule for this distribution (rules exist for "
-                                    (str/join ", " (map #(str "`" % "`") (sort (keys images))))
+                               (str "no image template for this distribution (templates exist for "
+                                    (str/join ", " (map #(str "`" % "`") (sort (keys image-templates))))
                                     "); set the Job's image by hand"))]}
       (nil? tag)
-      {:gaps [(setup/version-gap "java-version" version example)]}
+      {:gaps [(setup/version-gap spec version)]}
+      more-precise?
+      {:image (image-for tag)
+       :gaps [(setup/input-gap "java-version" version
+                               (str "JDK image tags name the feature release, so the Job uses `"
+                                    (image-for tag) "` (its latest update); pin an exact image tag by hand"
+                                    " if the Job needs " version))]}
       :else {:image (image-for tag)})))
 
 (def ^:private maven-settings-hint

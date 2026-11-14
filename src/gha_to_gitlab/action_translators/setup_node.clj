@@ -27,7 +27,7 @@
    step
    {:version-input "node-version"
     :version-file "node-version-file"
-    :image (setup/versioned-image "node" "node-version" node-tag "node:20")
+    :image (setup/versioned-image "node" node-tag)
     :default-image "node:lts"
     :default-note "no `node-version` given, so the current LTS"
     :example "node:20"

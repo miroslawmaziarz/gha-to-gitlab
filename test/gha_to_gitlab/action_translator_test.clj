@@ -50,14 +50,16 @@ jobs:
       (remove-method action-translator/translate "example/greet"))))
 
 (deftest job-settings-test
-  (testing "a translator's :job settings are merged onto its Job"
+  (testing "a translator's :job-settings wait on the Job as :action-job-settings, and its Converted Action says which it set"
     (defmethod action-translator/translate "example/tagger" [_step]
-      {:script [] :job {:tags ["gpu"]}})
+      {:script [] :job-settings {:tags ["gpu"]}})
     (try
-      (is (= ["gpu"]
-             (-> (github/workflow->ci-model
-                  "on: push\njobs:\n  build:\n    steps:\n      - uses: example/tagger@v1\n      - run: make\n")
-                 :jobs first :tags)))
+      (let [job (-> (github/workflow->ci-model
+                     "on: push\njobs:\n  build:\n    steps:\n      - uses: example/tagger@v1\n      - run: make\n")
+                    :jobs first)]
+        (is (= {:tags ["gpu"]} (:action-job-settings job)))
+        (is (nil? (:tags job)))
+        (is (= [[:tags]] (map :sets (:actions job)))))
       (finally
         (remove-method action-translator/translate "example/tagger")))))
 
@@ -71,7 +73,7 @@ jobs:
                {:workflow-path ".github/workflows/ci.yml"})
         job (-> model :jobs first)]
     (testing "when two Actions in one Job set different images, the first Action's image stays"
-      (is (= "node:20" (:image job))))
+      (is (= {:image "node:20"} (:action-job-settings job))))
     (testing "the later Action's conflicting image is a Gap at its Step; an identical image is not"
       (is (= [{:workflow ".github/workflows/ci.yml" :job "build" :step "Python"
                :action "actions/setup-python@v5"
@@ -80,5 +82,6 @@ jobs:
                              "but Step `Node` (Action `actions/setup-node@v4`) already set it to `node:20`, "
                              "which the Job keeps; use one image that has everything the Job needs, or split the Job.")}]
              (:gaps model))))
-    (testing "the Migration Report counts that Gap against the later Action"
+    (testing "the Converted Actions say which set the kept image, and count the Gap against the later Action"
+      (is (= [[:image] nil [:image]] (map :sets (:actions job))))
       (is (= [0 1 0] (map :gap-count (:actions job)))))))

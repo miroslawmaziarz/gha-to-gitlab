@@ -8,15 +8,16 @@
   "An Action that an Action Translator converted, as the Migration Report
   lists it: the Step and `uses:` value, the translator's `:outcome` (such as
   \"dropped (GitLab checks out the repository automatically)\") and how many
-  Gaps the translator raised for it. `:job` holds the Job settings the
-  translator asked for (such as `{:image \"node:20\"}`), whether or not the
-  Job kept them."
+  Gaps the translator raised for it. `:sets` names the Job settings the
+  Action supplied and the Job kept (such as `[:image]`), so the Migration
+  Report can say where a setting came from; the values themselves are in
+  the Job's `:action-job-settings` (ADR-0003)."
   [:map {:closed true}
    [:step :string]
    [:action :string]
    [:outcome [:string {:min 1}]]
    [:gap-count nat-int?]
-   [:job {:optional true} [:map-of :keyword any?]]])
+   [:sets {:optional true} [:vector :keyword]]])
 
 (def Job
   [:map {:closed true}
@@ -26,18 +27,12 @@
    ;; the Runner Mapping's image, kept when an Action's image overrides it
    [:runner-mapping-image {:optional true} [:string {:min 1}]]
    [:tags {:optional true} [:vector :string]]
+   ;; Job settings the Job's Actions asked for (one value per setting), not
+   ;; yet applied; `gha-to-gitlab.action-job-settings` applies them after
+   ;; the Runner Mapping and removes this key
+   [:action-job-settings {:optional true} [:map-of :keyword any?]]
    [:script [:vector {:min 1} :string]]
    [:actions {:optional true} [:vector ConvertedAction]]])
-
-(defn action-job-settings
-  "The Job settings that `job`'s converted Actions set, merged in Step order;
-  when two Actions set the same setting, the earlier Action's value wins.
-  These take precedence over settings from elsewhere, such as the Runner
-  Mapping image (ADR-0002)."
-  [job]
-  (reduce (fn [settings action] (merge (:job action) settings))
-          {}
-          (:actions job)))
 
 (def Gap
   "One Gap. `:message` is what the Migration Report shows; the optional keys

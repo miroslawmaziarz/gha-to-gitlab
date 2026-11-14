@@ -27,12 +27,15 @@
                           e.g. \"input `ref: main` has no GitLab equivalent: ...\".
                           An input a translator doesn't support must be a
                           Gap, never silently dropped.
-    :job      {k v}       Job settings, merged onto the CI Model Job, e.g. `{:image \"node:20\"}` from a setup Action. They
-                          take precedence over the Runner Mapping (ADR-0002).
-                          When two Actions in one Job set a setting to
-                          different values, the earlier Action's value stays
-                          and the later Step gets a Gap. Keys must be CI
-                          Model Job keys (`gha-to-gitlab.ci-model/Job`).
+    :job-settings {k v}   Job settings for the Step's Job, e.g.
+                          `{:image \"node:20\"}` from a setup Action; keys
+                          are CI Model Job keys (`gha-to-gitlab.ci-model/Job`).
+                          The Source reader settles them per Job into
+                          `:action-job-settings`: the earliest Action to set
+                          a setting wins, and a later Action setting it to a
+                          different value gets a Gap. They are applied after
+                          the Runner Mapping, so they win over it
+                          (`gha-to-gitlab.action-job-settings`, ADR-0002).
 
   An Action with no translator falls through to the default method, which
   returns nil, and the Migration Run records it as a Gap.
@@ -48,7 +51,7 @@
   (str/lower-case (first (str/split uses #"@" 2))))
 
 (defmulti translate
-  "Converts a Step that uses an Action into `{:script :outcome :gaps :job}` (see
+  "Converts a Step that uses an Action into `{:script :outcome :gaps :job-settings}` (see
   the namespace docstring), or returns nil when no Action Translator exists
   for that Action."
   (fn [step] (action-name (:uses step))))

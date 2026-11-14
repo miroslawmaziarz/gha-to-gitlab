@@ -70,26 +70,9 @@
     (is (= [{:message "Job `job0` runs on the expression `${{ matrix.os }}`, which is only known when the Workflow runs; resolve it and set the Job's image and tags by hand."}]
            (:gaps (runner-mapping/apply-runner-mappings (model-running-on "${{ matrix.os }}") {}))))))
 
-(defn- job-with-setup-action [label]
-  {:id "build" :runs-on label :script ["npm test"]
-   :actions [{:step "step 1" :action "actions/setup-node@v4" :outcome "converted"
-              :gap-count 0 :job {:image "node:20"}}]})
-
-(deftest action-image-precedence-test
-  (testing "an image an Action set takes precedence over the Runner Mapping image; tags still come from the Runner Mapping"
-    (let [job (-> (runner-mapping/apply-runner-mappings
-                   {:jobs [(job-with-setup-action "ubuntu-latest")] :gaps []}
-                   {"ubuntu-latest" {:image "ubuntu:24.04" :tags ["docker"]}})
-                  :jobs first)]
-      (is (= {:image "node:20" :tags ["docker"] :runner-mapping-image "ubuntu:24.04"}
-             (select-keys job [:image :tags :runner-mapping-image])))))
-  (testing "it wins even when the Job's :image was not yet set from its Actions"
-    (is (= "node:20"
-           (-> (runner-mapping/apply-runner-mappings
-                {:jobs [(job-with-setup-action "ubuntu-latest")] :gaps []} {})
-               :jobs first :image))))
-  (testing "an unmapped label is still a Gap, and the Action's image stays"
-    (let [model (runner-mapping/apply-runner-mappings
-                 {:jobs [(assoc (job-with-setup-action "macos-latest") :image "node:20")] :gaps []} {})]
-      (is (= "node:20" (-> model :jobs first :image)))
-      (is (= 1 (count (:gaps model)))))))
+(deftest unmapped-label-with-action-image-test
+  (testing "when an Action already sets the image, the unmapped-label Gap asks for tags only"
+    (is (= [{:message "Job `job0` runs on `macos-latest`, which has no Runner Mapping; add one in the Migration Config or set the Job's tags by hand (a setup Action sets its image)."}]
+           (:gaps (runner-mapping/apply-runner-mappings
+                   (assoc-in (model-running-on "macos-latest") [:jobs 0 :action-job-settings] {:image "node:20"})
+                   {}))))))

@@ -13,7 +13,7 @@
    step
    {:version-input "python-version"
     :version-file "python-version-file"
-    :image (setup/versioned-image "python" "python-version" setup/exact-version "python:3.12")
+    :image (setup/versioned-image "python" setup/exact-version)
     :default-image "python:3"
     :default-note "no `python-version` given, so the latest Python 3"
     :example "python:3.12"

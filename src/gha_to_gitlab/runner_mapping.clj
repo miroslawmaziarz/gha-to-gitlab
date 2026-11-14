@@ -1,9 +1,9 @@
 (ns gha-to-gitlab.runner-mapping
   "Runner Mapping: translates each Job's GitHub runner label (`runs-on`) into
-  a GitLab image and runner tags on the CI Model. Job settings an Action
-  Translator set (such as a setup Action's image) take precedence (ADR-0002)."
-  (:require [clojure.string :as str]
-            [gha-to-gitlab.ci-model :as ci-model]))
+  a GitLab image and runner tags on the CI Model. Job settings that Actions
+  asked for (such as a setup Action's image) are applied afterwards by
+  `gha-to-gitlab.action-job-settings` and win (ADR-0002)."
+  (:require [clojure.string :as str]))
 
 (def default-runner-mappings
   "Built-in Runner Mappings for the common GitHub-hosted labels."
@@ -23,33 +23,26 @@
               (:image (get default-runner-mappings "ubuntu-latest")))
      :tags []}))
 
-(defn- unmapped-gap [{:keys [id runs-on]}]
+(defn- unmapped-gap [{:keys [id runs-on action-job-settings]}]
   {:message (if (str/includes? runs-on "${{")
               (str "Job `" id "` runs on the expression `" runs-on "`, which is only known "
                    "when the Workflow runs; resolve it and set the Job's image and tags by hand.")
               (str "Job `" id "` runs on `" runs-on "`, which has no Runner Mapping; "
-                   "add one in the Migration Config or set the Job's image and tags by hand."))})
-
-(defn- mapped-job
-  "`job` with the Runner Mapping's image and tags, under the settings its
-  Actions set. When an Action set the image, the Runner Mapping's image is
-  kept as `:runner-mapping-image` so the Migration Report can show the
-  override."
-  [job {:keys [image tags]}]
-  (let [action-settings (ci-model/action-job-settings job)]
-    (cond-> (merge job {:image image :tags tags} action-settings)
-      (:image action-settings) (assoc :runner-mapping-image image))))
+                   "add one in the Migration Config or "
+                   (if (:image action-job-settings)
+                     "set the Job's tags by hand (a setup Action sets its image)."
+                     "set the Job's image and tags by hand.")))})
 
 (defn- map-job [mappings model job]
   (let [label (:runs-on job)]
-    (if-let [mapping (or (get mappings label) (ubuntu-fallback label))]
-      (update model :jobs conj (mapped-job job mapping))
+    (if-let [{:keys [image tags]} (or (get mappings label) (ubuntu-fallback label))]
+      (update model :jobs conj (assoc job :image image :tags tags))
       (cond-> (update model :jobs conj job)
         (some? label) (update :gaps conj (unmapped-gap job))))))
 
 (defn apply-runner-mappings
   "Sets `:image` and `:tags` on every Job of `model` from its `:runs-on`
-  label, except settings the Job's Actions set (see `mapped-job`), using the built-in Runner Mappings overridden by `overrides`
+  label, using the built-in Runner Mappings overridden by `overrides`
   (label → {:image .. :tags [..]}); any other `ubuntu-*` label falls back to
   an Ubuntu image. A label with no Runner Mapping adds a Gap."
   [model overrides]

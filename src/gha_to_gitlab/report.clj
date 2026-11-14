@@ -10,7 +10,7 @@
   `actions/setup-node@v4`, overriding the Runner Mapping image
   `ubuntu:24.04`)\"; nil when no Action set the Job's image."
   [{:keys [image actions runner-mapping-image]}]
-  (when-let [{:keys [step action]} (first (filter #(= image (get-in % [:job :image])) actions))]
+  (when-let [{:keys [step action]} (first (filter #(some #{:image} (:sets %)) actions))]
     (str "from Step `" step "` (Action `" action "`"
          (when (and runner-mapping-image (not= runner-mapping-image image))
            (str ", overriding the Runner Mapping image `" runner-mapping-image "`"))
