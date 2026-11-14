@@ -35,7 +35,7 @@
                :action "actions/checkout@v4" :input "ref"}]
              (mapv #(select-keys % [:workflow :job :step :action :input]) (:gaps model))))
       (is (= (str "Workflow `.github/workflows/ci.yml`, Job `build`, Step `Check out tools`: "
-                  "Action `actions/checkout@v4` input `ref: main` is not supported: "
+                  "Action `actions/checkout@v4` input `ref: main` has no GitLab equivalent: "
                   "GitLab checks out the commit the Pipeline runs for; "
                   "check out another ref in a script line if the Job needs it.")
              (-> model :gaps second :message))))))
@@ -43,10 +43,10 @@
 (deftest unsupported-values-test
   (testing "fetch-depth other than 1 and submodules other than false are Gaps pointing at the GitLab variable"
     (is (= [(str "Workflow `.github/workflows/ci.yml`, Job `build`, Step `step 1`: "
-                 "Action `actions/checkout@v4` input `fetch-depth: 0` is not supported: "
+                 "Action `actions/checkout@v4` input `fetch-depth: 0` has no GitLab equivalent: "
                  "set the Job's `GIT_DEPTH` variable (0 means full history) by hand.")
             (str "Workflow `.github/workflows/ci.yml`, Job `build`, Step `step 1`: "
-                 "Action `actions/checkout@v4` input `submodules: recursive` is not supported: "
+                 "Action `actions/checkout@v4` input `submodules: recursive` has no GitLab equivalent: "
                  "set the Job's `GIT_SUBMODULE_STRATEGY` variable (`normal` or `recursive`) by hand.")]
            (->> (convert (str "      - uses: actions/checkout@v4\n        with:\n"
                               "          fetch-depth: 0\n          submodules: recursive\n"))
@@ -55,3 +55,19 @@
     (is (= ["new-input"]
            (->> (convert "      - uses: actions/checkout@v4\n        with:\n          new-input: x\n")
                 :gaps (map :input))))))
+
+(deftest multi-line-value-test
+  (testing "a multi-line input value is collapsed onto one line in the Gap message"
+    (is (= (str "Workflow `.github/workflows/ci.yml`, Job `build`, Step `step 1`: "
+                "Action `actions/checkout@v4` input `sparse-checkout: src docs` has no GitLab equivalent: "
+                "GitLab's automatic checkout can't do this; check the Job works without it.")
+           (-> (convert (str "      - uses: actions/checkout@v4\n        with:\n"
+                             "          sparse-checkout: |\n            src\n            docs\n"))
+               :gaps first :message)))))
+
+(deftest case-insensitive-action-test
+  (testing "the Action name matches whatever its case, as GitHub owner/repo names do"
+    (let [model (convert "      - uses: ACTIONS/Checkout@v4\n")]
+      (is (= ["make"] (-> model :jobs first :script)))
+      (is (= [] (:gaps model)))
+      (is (= "ACTIONS/Checkout@v4" (-> model :jobs first :actions first :action))))))

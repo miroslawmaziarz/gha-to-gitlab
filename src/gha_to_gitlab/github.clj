@@ -32,37 +32,39 @@
   [s]
   (str "'" (str/replace s "'" "'\\''") "'"))
 
-(defn- unknown-action [workflow-path job-id step index]
-  (let [action (:uses step)
-        label (step-label step index)]
-    {:script [(str "echo " (shell-quote (str "Gap: Action " action " was not converted; see "
-                                             report/file-name)))]
-     :gaps [{:message (str "Workflow `" workflow-path "`, Job `" job-id "`, Step `" label
-                         "`: Action `" action "` has no Action Translator;"
-                         " replace its placeholder script line by hand.")
-           :workflow workflow-path
-           :job job-id
-           :step label
-           :action action}]}))
+(defn- step-location
+  "Where a Step that uses an Action is in the Source: the Gap keys
+  `:workflow :job :step :action`, plus `:prefix`, the start of a Gap message
+  naming them all."
+  [workflow-path job-id step index]
+  (let [label (step-label step index)
+        action (:uses step)]
+    {:workflow workflow-path
+     :job job-id
+     :step label
+     :action action
+     :prefix (str "Workflow `" workflow-path "`, Job `" job-id "`, Step `" label
+                  "`: Action `" action "` ")}))
 
 (defn- located-gap
-  "A Gap an Action Translator returned, placed at its Step in the Source."
-  [workflow-path job-id step index {:keys [message] :as gap}]
-  (let [label (step-label step index)]
-    (assoc gap
-           :message (str "Workflow `" workflow-path "`, Job `" job-id "`, Step `" label
-                         "`: Action `" (:uses step) "` " message)
-           :workflow workflow-path
-           :job job-id
-           :step label
-           :action (:uses step))))
+  "A Gap at `location` whose message continues the location's prefix."
+  [{:keys [prefix] :as location} {:keys [message] :as gap}]
+  (merge gap
+         (dissoc location :prefix)
+         {:message (str prefix message)}))
 
-(defn- translated-action [workflow-path job-id step index]
-  (when-let [{:keys [script gaps outcome]} (action-translator/translate step)]
+(defn- unknown-action [{:keys [action] :as location}]
+  {:script [(str "echo " (shell-quote (str "Gap: Action " action " was not converted; see "
+                                           report/file-name)))]
+   :gaps [(located-gap location {:message (str "has no Action Translator;"
+                                               " replace its placeholder script line by hand.")})]})
+
+(defn- translated-action [{:keys [step action] :as location} translation]
+  (let [{:keys [script gaps outcome]} translation]
     {:script (vec script)
-     :gaps (mapv #(located-gap workflow-path job-id step index %) gaps)
-     :action {:step (step-label step index)
-              :action (:uses step)
+     :gaps (mapv #(located-gap location %) gaps)
+     :action {:step step
+              :action action
               :outcome (or outcome "converted")
               :gap-count (count gaps)}}))
 
@@ -73,8 +75,10 @@
   [workflow-path job-id index step]
   (cond
     (:run step) {:script [(:run step)]}
-    (:uses step) (or (translated-action workflow-path job-id step index)
-                     (unknown-action workflow-path job-id step index))
+    (:uses step) (let [location (step-location workflow-path job-id step index)]
+                   (if-let [translation (action-translator/translate step)]
+                     (translated-action location translation)
+                     (unknown-action location)))
     :else (throw (ex-info (str "Job '" job-id "' has a Step with neither run: nor uses:")
                           {:job job-id :step step}))))
 

@@ -2,7 +2,8 @@
   "The Action Translator extension point. An Action Translator converts one
   Action into script lines, Gaps and (later) Job settings in the CI Model.
   Supporting a new Action means adding one `defmethod` on `translate`, keyed
-  by the Action's name without its version suffix:
+  by the Action's name in lower case without its version suffix (GitHub
+  owner and repository names are case-insensitive):
 
     (defmethod action-translator/translate \"actions/setup-node\"
       [step]
@@ -23,7 +24,7 @@
                           optional `:input` (the input's name); `:message`
                           continues a sentence that the Migration Run starts
                           with the Step's location and \"Action `<uses>` \",
-                          e.g. \"input `ref: main` is not supported: ...\".
+                          e.g. \"input `ref: main` has no GitLab equivalent: ...\".
                           An input a translator doesn't support must be a
                           Gap, never silently dropped.
 
@@ -39,10 +40,10 @@
   (:require [clojure.string :as str]))
 
 (defn action-name
-  "The Action a `uses:` value names, without its `@version` suffix
-  (`actions/checkout@v4` → `actions/checkout`)."
+  "The Action a `uses:` value names, in lower case and without its
+  `@version` suffix (`Actions/Checkout@v4` → `actions/checkout`)."
   [uses]
-  (first (str/split uses #"@" 2)))
+  (str/lower-case (first (str/split uses #"@" 2))))
 
 (defmulti translate
   "Converts a Step that uses an Action into `{:script :outcome :gaps}` (see
