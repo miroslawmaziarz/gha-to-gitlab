@@ -78,12 +78,27 @@
     :else (throw (ex-info (str "Job '" job-id "' has a Step with neither run: nor uses:")
                           {:job job-id :step step}))))
 
+(def ^:private nothing-left-to-run
+  "The script line of a Job whose Steps all converted to no script lines
+  (e.g. only `actions/checkout`); GitLab needs at least one."
+  (str "echo " (shell-quote "Nothing left to run after conversion")))
+
+(defn- job-script
+  "The Job's script lines from its converted Steps. When the Job has Steps
+  but none left a script line, it is the single `nothing-left-to-run` line;
+  a Job with no Steps stays empty and fails CI Model validation."
+  [steps]
+  (let [script (into [] (mapcat :script) steps)]
+    (if (and (seq steps) (empty? script))
+      [nothing-left-to-run]
+      script)))
+
 (defn- convert-job [workflow-path [job-id job]]
   (let [id (name job-id)
         steps (map-indexed #(convert-step workflow-path id %1 %2) (:steps job))]
     {:job (cond-> {:id id}
             (some? (:runs-on job)) (assoc :runs-on (runner-label (:runs-on job)))
-            true (assoc :script (into [] (mapcat :script) steps))
+            true (assoc :script (job-script steps))
             (some :action steps) (assoc :actions (into [] (keep :action) steps)))
      :gaps (into [] (mapcat :gaps) steps)}))
 
