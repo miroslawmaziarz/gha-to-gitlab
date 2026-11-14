@@ -69,3 +69,27 @@
   (testing "a runs-on expression is a Gap saying it must be resolved by hand, not mapped"
     (is (= [{:message "Job `job0` runs on the expression `${{ matrix.os }}`, which is only known when the Workflow runs; resolve it and set the Job's image and tags by hand."}]
            (:gaps (runner-mapping/apply-runner-mappings (model-running-on "${{ matrix.os }}") {}))))))
+
+(defn- job-with-setup-action [label]
+  {:id "build" :runs-on label :script ["npm test"]
+   :actions [{:step "step 1" :action "actions/setup-node@v4" :outcome "converted"
+              :gap-count 0 :job {:image "node:20"}}]})
+
+(deftest action-image-precedence-test
+  (testing "an image an Action set takes precedence over the Runner Mapping image; tags still come from the Runner Mapping"
+    (let [job (-> (runner-mapping/apply-runner-mappings
+                   {:jobs [(job-with-setup-action "ubuntu-latest")] :gaps []}
+                   {"ubuntu-latest" {:image "ubuntu:24.04" :tags ["docker"]}})
+                  :jobs first)]
+      (is (= {:image "node:20" :tags ["docker"] :runner-mapping-image "ubuntu:24.04"}
+             (select-keys job [:image :tags :runner-mapping-image])))))
+  (testing "it wins even when the Job's :image was not yet set from its Actions"
+    (is (= "node:20"
+           (-> (runner-mapping/apply-runner-mappings
+                {:jobs [(job-with-setup-action "ubuntu-latest")] :gaps []} {})
+               :jobs first :image))))
+  (testing "an unmapped label is still a Gap, and the Action's image stays"
+    (let [model (runner-mapping/apply-runner-mappings
+                 {:jobs [(assoc (job-with-setup-action "macos-latest") :image "node:20")] :gaps []} {})]
+      (is (= "node:20" (-> model :jobs first :image)))
+      (is (= 1 (count (:gaps model)))))))

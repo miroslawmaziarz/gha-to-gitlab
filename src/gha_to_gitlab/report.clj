@@ -5,16 +5,35 @@
 
 (def file-name "MIGRATION_REPORT.md")
 
+(defn- image-origin
+  "Where an image an Action set came from, e.g. \"from Step `Node` (Action
+  `actions/setup-node@v4`, overriding the Runner Mapping image
+  `ubuntu:24.04`)\"; nil when no Action set the Job's image."
+  [{:keys [image actions runner-mapping-image]}]
+  (when-let [{:keys [step action]} (first (filter #(= image (get-in % [:job :image])) actions))]
+    (str "from Step `" step "` (Action `" action "`"
+         (when (and runner-mapping-image (not= runner-mapping-image image))
+           (str ", overriding the Runner Mapping image `" runner-mapping-image "`"))
+         ")")))
+
 (defn- runner-part
-  "Which Runner Mapping a Job used, or that it had none."
-  [{:keys [runs-on image tags]}]
-  (cond
-    (nil? runs-on) ""
-    (nil? image) (str "; runs on `" runs-on "` → no Runner Mapping (see Gaps)")
-    :else (str "; runs on `" runs-on "` → image `" image "`, "
-               (if (seq tags)
-                 (str "tags " (str/join ", " (map #(str "`" % "`") tags)))
-                 "no tags"))))
+  "Which Runner Mapping a Job used, or that it had none, and which Action
+  set the Job's image when one did. The Runner Mapping always sets `:tags`
+  on the Jobs it maps."
+  [{:keys [runs-on image tags] :as job}]
+  (let [origin (image-origin job)
+        mapped? (contains? job :tags)]
+    (cond
+      (and (nil? runs-on) origin) (str "; image `" image "` " origin)
+      (nil? runs-on) ""
+      (not mapped?) (str "; runs on `" runs-on "` → no Runner Mapping (see Gaps)"
+                         (when origin (str "; image `" image "` " origin)))
+      :else (str "; runs on `" runs-on "` → image `" image "`"
+                 (when origin (str " " origin))
+                 ", "
+                 (if (seq tags)
+                   (str "tags " (str/join ", " (map #(str "`" % "`") tags)))
+                   "no tags")))))
 
 (defn- action-line [{:keys [step action outcome gap-count]}]
   (str "  - Step `" step "`: Action `" action "` " outcome

@@ -1,6 +1,6 @@
 (ns gha-to-gitlab.action-translator
   "The Action Translator extension point. An Action Translator converts one
-  Action into script lines, Gaps and (later) Job settings in the CI Model.
+  Action into script lines, Gaps and Job settings in the CI Model.
   Supporting a new Action means adding one `defmethod` on `translate`, keyed
   by the Action's name in lower case without its version suffix (GitHub
   owner and repository names are case-insensitive):
@@ -27,10 +27,12 @@
                           e.g. \"input `ref: main` has no GitLab equivalent: ...\".
                           An input a translator doesn't support must be a
                           Gap, never silently dropped.
-
-  Planned, not yet read by the Migration Run: `:job` for Job settings, e.g.
-  `{:image \"node:20\"}` from a setup Action, which overrides the Runner
-  Mapping image (ADR-0002), and cache and artifacts settings.
+    :job      {k v}       Job settings, merged onto the CI Model Job, e.g. `{:image \"node:20\"}` from a setup Action. They
+                          take precedence over the Runner Mapping (ADR-0002).
+                          When two Actions in one Job set a setting to
+                          different values, the earlier Action's value stays
+                          and the later Step gets a Gap. Keys must be CI
+                          Model Job keys (`gha-to-gitlab.ci-model/Job`).
 
   An Action with no translator falls through to the default method, which
   returns nil, and the Migration Run records it as a Gap.
@@ -46,7 +48,7 @@
   (str/lower-case (first (str/split uses #"@" 2))))
 
 (defmulti translate
-  "Converts a Step that uses an Action into `{:script :outcome :gaps}` (see
+  "Converts a Step that uses an Action into `{:script :outcome :gaps :job}` (see
   the namespace docstring), or returns nil when no Action Translator exists
   for that Action."
   (fn [step] (action-name (:uses step))))

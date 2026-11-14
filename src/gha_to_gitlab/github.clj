@@ -60,13 +60,15 @@
                                                " replace its placeholder script line by hand.")})]})
 
 (defn- translated-action [{:keys [step action] :as location} translation]
-  (let [{:keys [script gaps outcome]} translation]
+  (let [{:keys [script gaps outcome job]} translation]
     {:script (vec script)
      :gaps (mapv #(located-gap location %) gaps)
-     :action {:step step
-              :action action
-              :outcome (or outcome "converted")
-              :gap-count (count gaps)}}))
+     :location location
+     :action (cond-> {:step step
+                      :action action
+                      :outcome (or outcome "converted")
+                      :gap-count (count gaps)}
+               (seq job) (assoc :job job))}))
 
 (defn- convert-step
   "Converts one Step into `{:script [line ...] :gaps [gap ...]}`; `:gaps`
@@ -97,13 +99,43 @@
       [nothing-left-to-run]
       script)))
 
+(defn- conflict-gap [setting value {:keys [step action]} kept]
+  {:message (str "sets the Job's `" (name setting) "` to `" value "`, but Step `" step
+                 "` (Action `" action "`) already set it to `" kept "`, which the Job keeps; "
+                 (if (= :image setting)
+                   "use one image that has everything the Job needs, or split the Job."
+                   "settle on one value by hand."))})
+
+(defn- check-job-settings
+  "Adds a Gap to each Step whose Action sets a Job setting that an earlier
+  Action in the Job already set to a different value (such as two setup
+  Actions choosing different images), and counts it on that Step's
+  Converted Action. The earlier value is the one the Job keeps (see
+  `ci-model/action-job-settings`)."
+  [steps]
+  (first
+   (reduce (fn [[steps set-by] {:keys [action location] :as step}]
+             (let [conflicts (for [[k v] (:job action)
+                                   :let [[kept earlier] (get set-by k)]
+                                   :when (and earlier (not= v kept))]
+                               (located-gap location (conflict-gap k v earlier kept)))]
+               [(conj steps (cond-> step
+                              (seq conflicts) (-> (update :gaps into conflicts)
+                                                  (update-in [:action :gap-count] + (count conflicts)))))
+                (merge (update-vals (:job action) #(vector % action)) set-by)]))
+           [[] {}]
+           steps)))
+
 (defn- convert-job [workflow-path [job-id job]]
   (let [id (name job-id)
-        steps (map-indexed #(convert-step workflow-path id %1 %2) (:steps job))]
-    {:job (cond-> {:id id}
-            (some? (:runs-on job)) (assoc :runs-on (runner-label (:runs-on job)))
-            true (assoc :script (job-script steps))
-            (some :action steps) (assoc :actions (into [] (keep :action) steps)))
+        steps (->> (:steps job)
+                   (map-indexed #(convert-step workflow-path id %1 %2))
+                   check-job-settings)
+        ci-job (cond-> {:id id}
+                 (some? (:runs-on job)) (assoc :runs-on (runner-label (:runs-on job)))
+                 true (assoc :script (job-script steps))
+                 (some :action steps) (assoc :actions (into [] (keep :action) steps)))]
+    {:job (merge ci-job (ci-model/action-job-settings ci-job))
      :gaps (into [] (mapcat :gaps) steps)}))
 
 (defn workflow->ci-model
