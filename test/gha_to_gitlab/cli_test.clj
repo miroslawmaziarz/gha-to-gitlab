@@ -58,3 +58,12 @@
           exit (binding [*err* err] (cli/run ["does/not/exist" (temp-dir)]))]
       (is (= 1 exit))
       (is (str/includes? (str err) "Expected exactly one Workflow")))))
+
+(deftest gaps-still-succeed-test
+  (testing "a Migration Run that has Gaps still exits 0"
+    (let [src (temp-dir)
+          wf (io/file src ".github/workflows/ci.yml")]
+      (io/make-parents wf)
+      (spit wf "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: acme/unknown@v1\n")
+      (is (= 0 (binding [*out* (java.io.StringWriter.)]
+                 (cli/run [src (temp-dir)])))))))

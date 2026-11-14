@@ -13,8 +13,14 @@
    [:script [:vector {:min 1} :string]]])
 
 (def Gap
+  "One Gap. `:message` is what the Migration Report shows; the optional keys
+  say where in the Source the Gap is."
   [:map
-   [:message :string]])
+   [:message :string]
+   [:workflow {:optional true} :string]
+   [:job {:optional true} :string]
+   [:step {:optional true} :string]
+   [:action {:optional true} :string]])
 
 (def CIModel
   [:map {:closed true}

@@ -35,6 +35,27 @@
       (is (str/includes? (slurp (io/file out "MIGRATION_REPORT.md"))
                          "`image` → `image_job`")))))
 
+(deftest unknown-action-migration-run-test
+  (let [src (temp-dir)
+        out (temp-dir)
+        wf (io/file src ".github/workflows/deploy.yml")]
+    (io/make-parents wf)
+    (spit wf (str "on: push\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n    steps:\n"
+                  "      - uses: acme/login@v1\n      - run: make deploy\n"
+                  "      - name: Notify\n        uses: acme/notify@v3\n"))
+    (migration/run! {:source-dir src :output-dir out})
+    (testing "the Migration Run still writes the Pipeline, with placeholder script lines for the Gaps"
+      (is (= {:deploy {:image "ubuntu:24.04"
+                       :script ["echo 'Gap: Action acme/login@v1 was not converted; see MIGRATION_REPORT.md'"
+                                "make deploy"
+                                "echo 'Gap: Action acme/notify@v3 was not converted; see MIGRATION_REPORT.md'"]}}
+             (yaml/parse-string (slurp (io/file out ".gitlab-ci.yml"))))))
+    (testing "the Migration Report shows the Gap count and lists each Gap"
+      (let [report (slurp (io/file out "MIGRATION_REPORT.md"))]
+        (is (str/includes? report "2 Gaps need a person to finish them:"))
+        (is (str/includes? report "Step `step 1`: Action `acme/login@v1`"))
+        (is (str/includes? report "Step `Notify`: Action `acme/notify@v3`"))))))
+
 (defn- source-with-workflow [workflow-yaml]
   (let [src (temp-dir)
         wf (io/file src ".github/workflows/ci.yml")]

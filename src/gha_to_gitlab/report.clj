@@ -3,6 +3,8 @@
   (:require [clojure.string :as str]
             [gha-to-gitlab.gitlab :as gitlab]))
 
+(def file-name "MIGRATION_REPORT.md")
+
 (defn- runner-part
   "Which Runner Mapping a Job used, or that it had none."
   [{:keys [runs-on image tags]}]
@@ -42,7 +44,11 @@
      ""]
     (map job-line (:jobs model))
     ["" "## Gaps" ""]
-    (if (seq (:gaps model))
-      (map gap-line (:gaps model))
+    (if-let [gaps (seq (:gaps model))]
+      (concat [(if (= 1 (count gaps))
+                 "1 Gap needs a person to finish it:"
+                 (str (count gaps) " Gaps need a person to finish them:"))
+               ""]
+              (map gap-line gaps))
       ["No Gaps: nothing needs a person to finish it."])
     [""])))
