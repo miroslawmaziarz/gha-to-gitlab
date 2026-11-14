@@ -30,6 +30,10 @@ _Avoid_: rule, handler, mapping
 The configured translation from a GitHub runner label (`runs-on`) to a GitLab image and runner tags.
 _Avoid_: runs-on mapping, machine mapping
 
+**Migration Config**:
+The optional EDN file a person passes to a Migration Run (`--config`) to adjust the conversion, such as overriding or adding Runner Mappings; it is input to the tool, not part of the Source or Target.
+_Avoid_: config, settings, options file
+
 **Gap**:
 One element of the Source that the Migration Run could not convert faithfully and that a person must handle (an unknown Action, a Secret value, a complex expression).
 _Avoid_: TODO, warning, unsupported item

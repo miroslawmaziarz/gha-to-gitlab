@@ -2,9 +2,11 @@
   "A Migration Run: Source → CI Model → Target, plus the Migration Report."
   (:refer-clojure :exclude [run!])
   (:require [clojure.java.io :as io]
+            [gha-to-gitlab.config :as config]
             [gha-to-gitlab.github :as github]
             [gha-to-gitlab.gitlab :as gitlab]
-            [gha-to-gitlab.report :as report]))
+            [gha-to-gitlab.report :as report]
+            [gha-to-gitlab.runner-mapping :as runner-mapping]))
 
 (def ^:private workflows-dir ".github/workflows")
 
@@ -23,12 +25,15 @@
 
 (defn run!
   "Runs one Migration Run against the local clone at `source-dir`, writing
-  `.gitlab-ci.yml` and `MIGRATION_REPORT.md` into `output-dir`.
+  `.gitlab-ci.yml` and `MIGRATION_REPORT.md` into `output-dir`. An optional
+  `config-path` names the Migration Config (see `gha-to-gitlab.config`).
   Returns the paths written."
-  [{:keys [source-dir output-dir]}]
-  (let [workflow (single-workflow source-dir)
+  [{:keys [source-dir output-dir config-path]}]
+  (let [{:keys [runner-mappings]} (config/load-config config-path)
+        workflow (single-workflow source-dir)
         workflow-path (str workflows-dir "/" (.getName workflow))
-        model (github/workflow->ci-model (slurp workflow) {:workflow-path workflow-path})
+        model (-> (github/workflow->ci-model (slurp workflow) {:workflow-path workflow-path})
+                  (runner-mapping/apply-runner-mappings runner-mappings))
         ci-file (io/file output-dir gitlab/ci-file-name)
         report-file (io/file output-dir report/file-name)]
     (.mkdirs (io/file output-dir))

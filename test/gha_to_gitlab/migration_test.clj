@@ -9,17 +9,20 @@
 (deftest migration-run-against-fixture-test
   (let [out (temp-dir)]
     (migration/run! {:source-dir "test/fixtures/plain-workflow" :output-dir out})
-    (testing "writes a .gitlab-ci.yml with one Job per GitHub Job and the commands as script lines"
-      (is (= {:build {:script ["npm ci" "npm run build"]}
-              :test {:script ["npm ci" "npm test\nnpm run coverage\n"]}
-              :lint {:script ["npm run lint"]}}
+    (testing "writes a .gitlab-ci.yml with one Job per GitHub Job, its mapped image, and the commands as script lines"
+      (is (= {:build {:image "ubuntu:24.04" :script ["npm ci" "npm run build"]}
+              :test {:image "ubuntu:24.04" :script ["npm ci" "npm test\nnpm run coverage\n"]}
+              :lint {:image "ubuntu:24.04" :script ["npm run lint"]}}
              (yaml/parse-string (slurp (io/file out ".gitlab-ci.yml"))))))
     (testing "writes a Migration Report listing the converted Workflow and Jobs and no Gaps"
       (let [report (slurp (io/file out "MIGRATION_REPORT.md"))]
         (is (str/includes? report ".github/workflows/ci.yml"))
         (doseq [job ["build" "test" "lint"]]
           (is (str/includes? report (str "`" job "`"))))
-        (is (str/includes? report "No Gaps"))))))
+        (is (str/includes? report "No Gaps"))))
+    (testing "the Migration Report lists the Runner Mapping each Job used"
+      (is (str/includes? (slurp (io/file out "MIGRATION_REPORT.md"))
+                         "- `build`: 2 script lines; runs on `ubuntu-latest` → image `ubuntu:24.04`, no tags")))))
 
 (deftest reserved-keyword-job-report-test
   (testing "the Migration Report tells the person a Job was renamed"
@@ -42,7 +45,8 @@
                   "      - name: Notify\n        uses: acme/notify@v3\n"))
     (migration/run! {:source-dir src :output-dir out})
     (testing "the Migration Run still writes the Pipeline, with placeholder script lines for the Gaps"
-      (is (= {:deploy {:script ["echo 'Gap: Action acme/login@v1 was not converted; see MIGRATION_REPORT.md'"
+      (is (= {:deploy {:image "ubuntu:24.04"
+                       :script ["echo 'Gap: Action acme/login@v1 was not converted; see MIGRATION_REPORT.md'"
                                 "make deploy"
                                 "echo 'Gap: Action acme/notify@v3 was not converted; see MIGRATION_REPORT.md'"]}}
              (yaml/parse-string (slurp (io/file out ".gitlab-ci.yml"))))))
@@ -51,3 +55,22 @@
         (is (str/includes? report "2 Gaps need a person to finish them:"))
         (is (str/includes? report "Step `step 1`: Action `acme/login@v1`"))
         (is (str/includes? report "Step `Notify`: Action `acme/notify@v3`"))))))
+
+(defn- source-with-workflow [workflow-yaml]
+  (let [src (temp-dir)
+        wf (io/file src ".github/workflows/ci.yml")]
+    (io/make-parents wf)
+    (spit wf workflow-yaml)
+    src))
+
+(deftest unmapped-runner-test
+  (let [out (temp-dir)]
+    (migration/run! {:source-dir (source-with-workflow "on: push\njobs:\n  mac:\n    runs-on: macos-latest\n    steps:\n      - run: xcodebuild\n")
+                     :output-dir out})
+    (testing "the Job is still written, without an image"
+      (is (= {:mac {:script ["xcodebuild"]}}
+             (yaml/parse-string (slurp (io/file out ".gitlab-ci.yml"))))))
+    (testing "the Migration Report shows the Job has no Runner Mapping and lists the Gap"
+      (let [report (slurp (io/file out "MIGRATION_REPORT.md"))]
+        (is (str/includes? report "- `mac`: 1 script line; runs on `macos-latest` → no Runner Mapping (see Gaps)"))
+        (is (str/includes? report "- Job `mac` runs on `macos-latest`, which has no Runner Mapping"))))))

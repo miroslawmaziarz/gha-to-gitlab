@@ -17,9 +17,15 @@
   [id]
   (if (global-keywords id) (str id "_job") id))
 
+(defn- gitlab-job [{:keys [image tags script]}]
+  (cond-> (ordered-map)
+    image (assoc :image image)
+    (seq tags) (assoc :tags tags)
+    true (assoc :script script)))
+
 (defn- ci-model->job-map [model]
   (into (ordered-map)
-        (map (fn [{:keys [id script]}] [(job-name id) {:script script}]))
+        (map (fn [job] [(job-name (:id job)) (gitlab-job job)]))
         (:jobs model)))
 
 (defn ci-model->gitlab-ci-yaml
