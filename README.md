@@ -38,9 +38,11 @@ clojure -M:run test/fixtures/plain-workflow /tmp/migration-out
 
 ### Runner Mapping
 
-Each Job's `runs-on` label is translated to a GitLab image and runner tags. Built-in Runner Mappings cover `ubuntu-latest`, `ubuntu-24.04`, `ubuntu-22.04` and `ubuntu-20.04` (the matching `ubuntu:` image, no tags). A label with no Runner Mapping (such as `macos-latest` or a self-hosted label) leaves the Job without an image and becomes a Gap; a `runs-on` list of several labels is looked up as one label joined with `, ` (e.g. `self-hosted, linux`).
+Each Job's `runs-on` label is translated to a GitLab image and runner tags. Built-in Runner Mappings cover `ubuntu-latest`, `ubuntu-24.04`, `ubuntu-22.04` and `ubuntu-20.04` (the matching `ubuntu:` image, no tags). Any other `ubuntu-*` label uses the Ubuntu version in the label (`ubuntu-22.04-arm` → `ubuntu:22.04`), or the `ubuntu-latest` image when it names none (`ubuntu-latest-4-cores` → `ubuntu:24.04`), with no tags.
 
-To override or extend the built-in Runner Mappings, pass an EDN config file with `--config`:
+A label with no Runner Mapping (such as `macos-latest` or a self-hosted label) leaves the Job without an image and becomes a Gap. A `runs-on` list of several labels is looked up as one label joined with `, ` (e.g. `self-hosted, linux`), and a runner group as `group: big, labels: [linux, x64]`. A `runs-on` expression such as `${{ matrix.os }}` is a Gap to resolve by hand.
+
+To override or extend the Runner Mappings, pass a Migration Config (an EDN file) with `--config`; its entries win over the built-in ones:
 
 ```clojure
 ;; migration.edn
@@ -70,7 +72,7 @@ Conversion always goes Source → CI Model → Target (ADR-0001):
 - `gha-to-gitlab.github`: reads a Workflow into the CI Model
 - `gha-to-gitlab.ci-model`: the CI Model's Malli schema
 - `gha-to-gitlab.runner-mapping`: applies Runner Mappings to the CI Model's Jobs
-- `gha-to-gitlab.config`: reads and validates the optional EDN config file
+- `gha-to-gitlab.config`: reads and validates the optional Migration Config
 - `gha-to-gitlab.gitlab`: writes the CI Model as `.gitlab-ci.yml`
 - `gha-to-gitlab.report`: renders the Migration Report
 - `gha-to-gitlab.migration`: one Migration Run, end to end

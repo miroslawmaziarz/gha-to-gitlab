@@ -26,7 +26,7 @@
 (defn run!
   "Runs one Migration Run against the local clone at `source-dir`, writing
   `.gitlab-ci.yml` and `MIGRATION_REPORT.md` into `output-dir`. An optional
-  `config-path` names an EDN config file (see `gha-to-gitlab.config`).
+  `config-path` names the Migration Config (see `gha-to-gitlab.config`).
   Returns the paths written."
   [{:keys [source-dir output-dir config-path]}]
   (let [{:keys [runner-mappings]} (config/load-config config-path)

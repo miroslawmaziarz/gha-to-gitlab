@@ -24,8 +24,8 @@
       (is (= [nil nil] (map :image (:jobs model))))
       (is (= [nil nil] (map :tags (:jobs model)))))
     (testing "each unmapped label is a Gap naming the Job and the label"
-      (is (= [{:message "Job `job0` runs on `macos-latest`, which has no Runner Mapping; add one in the config file or set the Job's image and tags by hand."}
-              {:message "Job `job1` runs on `self-hosted, linux`, which has no Runner Mapping; add one in the config file or set the Job's image and tags by hand."}]
+      (is (= [{:message "Job `job0` runs on `macos-latest`, which has no Runner Mapping; add one in the Migration Config or set the Job's image and tags by hand."}
+              {:message "Job `job1` runs on `self-hosted, linux`, which has no Runner Mapping; add one in the Migration Config or set the Job's image and tags by hand."}]
              (:gaps model))))))
 
 (deftest missing-runs-on-test
@@ -46,3 +46,26 @@
              (map #(select-keys % [:image :tags]) (:jobs model)))))
     (testing "a label mapped by an override is not a Gap"
       (is (= [] (:gaps model))))))
+
+(deftest other-ubuntu-labels-test
+  (let [model (runner-mapping/apply-runner-mappings
+               (model-running-on "ubuntu-22.04-arm" "ubuntu-24.04-arm" "ubuntu-latest-4-cores")
+               {})]
+    (testing "other ubuntu-* labels use the version in the label, or the ubuntu-latest image, with no tags"
+      (is (= [{:image "ubuntu:22.04" :tags []}
+              {:image "ubuntu:24.04" :tags []}
+              {:image "ubuntu:24.04" :tags []}]
+             (map #(select-keys % [:image :tags]) (:jobs model)))))
+    (testing "they are not Gaps"
+      (is (= [] (:gaps model)))))
+  (testing "a Migration Config entry for such a label still wins"
+    (is (= "custom:arm"
+           (-> (runner-mapping/apply-runner-mappings
+                (model-running-on "ubuntu-24.04-arm")
+                {"ubuntu-24.04-arm" {:image "custom:arm" :tags []}})
+               :jobs first :image)))))
+
+(deftest expression-label-test
+  (testing "a runs-on expression is a Gap saying it must be resolved by hand, not mapped"
+    (is (= [{:message "Job `job0` runs on the expression `${{ matrix.os }}`, which is only known when the Workflow runs; resolve it and set the Job's image and tags by hand."}]
+           (:gaps (runner-mapping/apply-runner-mappings (model-running-on "${{ matrix.os }}") {}))))))

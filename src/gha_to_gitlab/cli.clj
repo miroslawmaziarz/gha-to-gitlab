@@ -4,7 +4,7 @@
   (:gen-class))
 
 (def ^:private usage
-  "Usage: clojure -M:run [--config <config.edn>] <path-to-local-clone> <output-dir>")
+  "Usage: clojure -M:run [--config <migration-config.edn>] <path-to-local-clone> <output-dir>")
 
 (defn- print-err [& xs]
   (binding [*out* *err*] (apply println xs)))

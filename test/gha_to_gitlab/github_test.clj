@@ -43,4 +43,8 @@ jobs:
   (testing "a runs-on with several labels keeps them joined, so it can still be mapped or reported"
     (is (= "self-hosted, linux"
            (-> "on: push\njobs:\n  b:\n    runs-on: [self-hosted, linux]\n    steps:\n      - run: make\n"
-               github/workflow->ci-model :jobs first :runs-on)))))
+               github/workflow->ci-model :jobs first :runs-on))))
+  (testing "a runner group keeps its keys in YAML-like form"
+    (is (= ["group: big" "group: big, labels: [linux, x64]"]
+           (->> "on: push\njobs:\n  a:\n    runs-on:\n      group: big\n    steps:\n      - run: make\n  b:\n    runs-on:\n      group: big\n      labels: [linux, x64]\n    steps:\n      - run: make\n"
+                github/workflow->ci-model :jobs (map :runs-on))))))

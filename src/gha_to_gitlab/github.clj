@@ -9,14 +9,22 @@
       (throw (ex-info (str "Job '" job-id "' has a Step without run:, which is not supported yet")
                       {:job job-id :step step}))))
 
+(defn- yaml-ish
+  "A YAML value as short flow-style text, e.g. `[linux, x64]`."
+  [v]
+  (if (sequential? v)
+    (str "[" (str/join ", " (map yaml-ish v)) "]")
+    (str v)))
+
 (defn- runner-label
   "The `runs-on` of a Job as one label string: a list of labels is joined
-  with \", \"; any other shape (such as a runner group) is kept as written."
+  with \", \"; a runner group is written in YAML-like form
+  (`group: big, labels: [linux, x64]`)."
   [runs-on]
   (cond
-    (string? runs-on) runs-on
     (sequential? runs-on) (str/join ", " runs-on)
-    :else (pr-str runs-on)))
+    (map? runs-on) (str/join ", " (map (fn [[k v]] (str (name k) ": " (yaml-ish v))) runs-on))
+    :else (str runs-on)))
 
 (defn- job->ci-model [[job-id job]]
   (let [id (name job-id)]
