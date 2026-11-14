@@ -24,6 +24,27 @@ jobs:
     (try
       (is (= {:jobs [{:id "build" :runs-on "ubuntu-latest" :script ["echo hello world" "echo hello GitLab"]}]
               :gaps []}
-             (github/workflow->ci-model greet-workflow)))
+             (update (github/workflow->ci-model greet-workflow) :jobs
+                     (partial mapv #(dissoc % :actions)))))
       (finally
         (remove-method action-translator/translate "example/greet")))))
+
+(deftest translator-gaps-and-outcome-test
+  (defmethod action-translator/translate "example/greet" [step]
+    {:script [(str "echo hello " (get-in step [:with :who]))]
+     :gaps (when (= "GitLab" (get-in step [:with :who]))
+             [{:input "who" :message "input `who` is too polite."}])})
+  (try
+    (let [model (github/workflow->ci-model greet-workflow {:workflow-path "ci.yml"})]
+      (testing "a Gap the translator returns is placed at its Step, with the Action named in its message"
+        (is (= [{:message "Workflow `ci.yml`, Job `build`, Step `step 2`: Action `example/greet@8f4b7f84864484a7bf31766abe9204da3cbe65b3` input `who` is too polite."
+                 :workflow "ci.yml" :job "build" :step "step 2"
+                 :action "example/greet@8f4b7f84864484a7bf31766abe9204da3cbe65b3" :input "who"}]
+               (:gaps model))))
+      (testing "the Job records each converted Action; with no :outcome it is \"converted\""
+        (is (= [{:step "step 1" :action "example/greet@v4" :outcome "converted" :gap-count 0}
+                {:step "step 2" :action "example/greet@8f4b7f84864484a7bf31766abe9204da3cbe65b3"
+                 :outcome "converted" :gap-count 1}]
+               (-> model :jobs first :actions)))))
+    (finally
+      (remove-method action-translator/translate "example/greet"))))

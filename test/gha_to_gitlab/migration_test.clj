@@ -74,3 +74,25 @@
       (let [report (slurp (io/file out "MIGRATION_REPORT.md"))]
         (is (str/includes? report "- `mac`: 1 script line; runs on `macos-latest` → no Runner Mapping (see Gaps)"))
         (is (str/includes? report "- Job `mac` runs on `macos-latest`, which has no Runner Mapping"))))))
+
+(deftest converted-actions-report-test
+  (let [out (temp-dir)]
+    (migration/run! {:source-dir (source-with-workflow
+                                  (str "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n"
+                                       "      - uses: actions/checkout@v4\n"
+                                       "      - name: Tools\n        uses: actions/checkout@v4\n"
+                                       "        with:\n          repository: acme/tools\n"
+                                       "      - uses: acme/unknown@v1\n"
+                                       "      - run: make\n"
+                                       "  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n"))
+                     :output-dir out})
+    (let [report (slurp (io/file out "MIGRATION_REPORT.md"))]
+      (testing "the Migration Report lists under each Job the Actions it converted and the translator's outcome"
+        (is (str/includes? report
+                           (str "- `build`: 2 script lines; runs on `ubuntu-latest` → image `ubuntu:24.04`, no tags\n"
+                                "  - Step `step 1`: Action `actions/checkout@v4` dropped (GitLab checks out the repository automatically)\n"
+                                "  - Step `Tools`: Action `actions/checkout@v4` dropped (GitLab checks out the repository automatically); 1 Gap\n"
+                                "- `lint`: 1 script line"))))
+      (testing "an Action with no Action Translator is not listed as converted"
+        (is (not (str/includes? report "Step `step 3`: Action `acme/unknown@v1` dropped")))
+        (is (not (re-find #"(?m)^  - Step `step 3`" report)))))))

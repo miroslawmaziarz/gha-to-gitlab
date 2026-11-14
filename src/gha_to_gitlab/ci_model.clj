@@ -4,23 +4,37 @@
   (:require [malli.core :as m]
             [malli.error :as me]))
 
+(def ConvertedAction
+  "An Action that an Action Translator converted, as the Migration Report
+  lists it: the Step and `uses:` value, the translator's `:outcome` (such as
+  \"dropped (GitLab checks out the repository automatically)\") and how many
+  Gaps the translator raised for it."
+  [:map {:closed true}
+   [:step :string]
+   [:action :string]
+   [:outcome [:string {:min 1}]]
+   [:gap-count nat-int?]])
+
 (def Job
   [:map {:closed true}
    [:id [:string {:min 1}]]
    [:runs-on {:optional true} :string]
    [:image {:optional true} [:string {:min 1}]]
    [:tags {:optional true} [:vector :string]]
-   [:script [:vector {:min 1} :string]]])
+   [:script [:vector {:min 1} :string]]
+   [:actions {:optional true} [:vector ConvertedAction]]])
 
 (def Gap
   "One Gap. `:message` is what the Migration Report shows; the optional keys
-  say where in the Source the Gap is."
+  say where in the Source the Gap is (`:input` names the Action input an
+  Action Translator could not convert)."
   [:map
    [:message :string]
    [:workflow {:optional true} :string]
    [:job {:optional true} :string]
    [:step {:optional true} :string]
-   [:action {:optional true} :string]])
+   [:action {:optional true} :string]
+   [:input {:optional true} :string]])
 
 (def CIModel
   [:map {:closed true}

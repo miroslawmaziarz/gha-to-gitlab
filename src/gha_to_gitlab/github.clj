@@ -37,21 +37,43 @@
         label (step-label step index)]
     {:script [(str "echo " (shell-quote (str "Gap: Action " action " was not converted; see "
                                              report/file-name)))]
-     :gap {:message (str "Workflow `" workflow-path "`, Job `" job-id "`, Step `" label
+     :gaps [{:message (str "Workflow `" workflow-path "`, Job `" job-id "`, Step `" label
                          "`: Action `" action "` has no Action Translator;"
                          " replace its placeholder script line by hand.")
            :workflow workflow-path
            :job job-id
            :step label
-           :action action}}))
+           :action action}]}))
+
+(defn- located-gap
+  "A Gap an Action Translator returned, placed at its Step in the Source."
+  [workflow-path job-id step index {:keys [message] :as gap}]
+  (let [label (step-label step index)]
+    (assoc gap
+           :message (str "Workflow `" workflow-path "`, Job `" job-id "`, Step `" label
+                         "`: Action `" (:uses step) "` " message)
+           :workflow workflow-path
+           :job job-id
+           :step label
+           :action (:uses step))))
+
+(defn- translated-action [workflow-path job-id step index]
+  (when-let [{:keys [script gaps outcome]} (action-translator/translate step)]
+    {:script (vec script)
+     :gaps (mapv #(located-gap workflow-path job-id step index %) gaps)
+     :action {:step (step-label step index)
+              :action (:uses step)
+              :outcome (or outcome "converted")
+              :gap-count (count gaps)}}))
 
 (defn- convert-step
-  "Converts one Step into `{:script [line ...]}`, plus a `:gap` when the
-  Step could not be converted faithfully."
+  "Converts one Step into `{:script [line ...] :gaps [gap ...]}`; `:gaps`
+  lists what could not be converted faithfully, and `:action` records an
+  Action that an Action Translator converted."
   [workflow-path job-id index step]
   (cond
     (:run step) {:script [(:run step)]}
-    (:uses step) (or (action-translator/translate step)
+    (:uses step) (or (translated-action workflow-path job-id step index)
                      (unknown-action workflow-path job-id step index))
     :else (throw (ex-info (str "Job '" job-id "' has a Step with neither run: nor uses:")
                           {:job job-id :step step}))))
@@ -61,8 +83,9 @@
         steps (map-indexed #(convert-step workflow-path id %1 %2) (:steps job))]
     {:job (cond-> {:id id}
             (some? (:runs-on job)) (assoc :runs-on (runner-label (:runs-on job)))
-            true (assoc :script (into [] (mapcat :script) steps)))
-     :gaps (keep :gap steps)}))
+            true (assoc :script (into [] (mapcat :script) steps))
+            (some :action steps) (assoc :actions (into [] (keep :action) steps)))
+     :gaps (into [] (mapcat :gaps) steps)}))
 
 (defn workflow->ci-model
   "Converts the YAML text of one Workflow into a validated CI Model.

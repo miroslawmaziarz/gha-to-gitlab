@@ -16,15 +16,25 @@
                  (str "tags " (str/join ", " (map #(str "`" % "`") tags)))
                  "no tags"))))
 
-(defn- job-line [{:keys [id script] :as job}]
+(defn- action-line [{:keys [step action outcome gap-count]}]
+  (str "  - Step `" step "`: Action `" action "` " outcome
+       (case gap-count
+         0 ""
+         1 "; 1 Gap"
+         (str "; " gap-count " Gaps"))))
+
+(defn- job-lines
+  "The Job's line, then one nested line per Action it converted."
+  [{:keys [id script actions] :as job}]
   (let [target-name (gitlab/job-name id)
         n (count script)]
-    (format "- `%s`%s: %d script line%s%s"
-            id
-            (if (= id target-name) "" (str " → `" target-name "` (renamed: `" id "` is a GitLab keyword)"))
-            n
-            (if (= 1 n) "" "s")
-            (runner-part job))))
+    (cons (format "- `%s`%s: %d script line%s%s"
+                  id
+                  (if (= id target-name) "" (str " → `" target-name "` (renamed: `" id "` is a GitLab keyword)"))
+                  n
+                  (if (= 1 n) "" "s")
+                  (runner-part job))
+          (map action-line actions))))
 
 (defn- gap-line [{:keys [message]}]
   (str "- " message))
@@ -42,7 +52,7 @@
      ""
      (str "Workflow `" workflow-path "` became `" gitlab/ci-file-name "` with these Jobs:")
      ""]
-    (map job-line (:jobs model))
+    (mapcat job-lines (:jobs model))
     ["" "## Gaps" ""]
     (if-let [gaps (seq (:gaps model))]
       (concat [(if (= 1 (count gaps))
