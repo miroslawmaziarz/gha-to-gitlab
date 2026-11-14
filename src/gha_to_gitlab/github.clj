@@ -32,37 +32,79 @@
   [s]
   (str "'" (str/replace s "'" "'\\''") "'"))
 
-(defn- unknown-action [workflow-path job-id step index]
-  (let [action (:uses step)
-        label (step-label step index)]
-    {:script [(str "echo " (shell-quote (str "Gap: Action " action " was not converted; see "
-                                             report/file-name)))]
-     :gap {:message (str "Workflow `" workflow-path "`, Job `" job-id "`, Step `" label
-                         "`: Action `" action "` has no Action Translator;"
-                         " replace its placeholder script line by hand.")
-           :workflow workflow-path
-           :job job-id
-           :step label
-           :action action}}))
+(defn- step-location
+  "Where a Step that uses an Action is in the Source: the Gap keys
+  `:workflow :job :step :action`, plus `:prefix`, the start of a Gap message
+  naming them all."
+  [workflow-path job-id step index]
+  (let [label (step-label step index)
+        action (:uses step)]
+    {:workflow workflow-path
+     :job job-id
+     :step label
+     :action action
+     :prefix (str "Workflow `" workflow-path "`, Job `" job-id "`, Step `" label
+                  "`: Action `" action "` ")}))
+
+(defn- located-gap
+  "A Gap at `location` whose message continues the location's prefix."
+  [{:keys [prefix] :as location} {:keys [message] :as gap}]
+  (merge gap
+         (dissoc location :prefix)
+         {:message (str prefix message)}))
+
+(defn- unknown-action [{:keys [action] :as location}]
+  {:script [(str "echo " (shell-quote (str "Gap: Action " action " was not converted; see "
+                                           report/file-name)))]
+   :gaps [(located-gap location {:message (str "has no Action Translator;"
+                                               " replace its placeholder script line by hand.")})]})
+
+(defn- translated-action [{:keys [step action] :as location} translation]
+  (let [{:keys [script gaps outcome]} translation]
+    {:script (vec script)
+     :gaps (mapv #(located-gap location %) gaps)
+     :action {:step step
+              :action action
+              :outcome (or outcome "converted")
+              :gap-count (count gaps)}}))
 
 (defn- convert-step
-  "Converts one Step into `{:script [line ...]}`, plus a `:gap` when the
-  Step could not be converted faithfully."
+  "Converts one Step into `{:script [line ...] :gaps [gap ...]}`; `:gaps`
+  lists what could not be converted faithfully, and `:action` records an
+  Action that an Action Translator converted."
   [workflow-path job-id index step]
   (cond
     (:run step) {:script [(:run step)]}
-    (:uses step) (or (action-translator/translate step)
-                     (unknown-action workflow-path job-id step index))
+    (:uses step) (let [location (step-location workflow-path job-id step index)]
+                   (if-let [translation (action-translator/translate step)]
+                     (translated-action location translation)
+                     (unknown-action location)))
     :else (throw (ex-info (str "Job '" job-id "' has a Step with neither run: nor uses:")
                           {:job job-id :step step}))))
+
+(def ^:private nothing-left-to-run
+  "The script line of a Job whose Steps all converted to no script lines
+  (e.g. only `actions/checkout`); GitLab needs at least one."
+  (str "echo " (shell-quote "Nothing left to run after conversion")))
+
+(defn- job-script
+  "The Job's script lines from its converted Steps. When the Job has Steps
+  but none left a script line, it is the single `nothing-left-to-run` line;
+  a Job with no Steps stays empty and fails CI Model validation."
+  [steps]
+  (let [script (into [] (mapcat :script) steps)]
+    (if (and (seq steps) (empty? script))
+      [nothing-left-to-run]
+      script)))
 
 (defn- convert-job [workflow-path [job-id job]]
   (let [id (name job-id)
         steps (map-indexed #(convert-step workflow-path id %1 %2) (:steps job))]
     {:job (cond-> {:id id}
             (some? (:runs-on job)) (assoc :runs-on (runner-label (:runs-on job)))
-            true (assoc :script (into [] (mapcat :script) steps)))
-     :gaps (keep :gap steps)}))
+            true (assoc :script (job-script steps))
+            (some :action steps) (assoc :actions (into [] (keep :action) steps)))
+     :gaps (into [] (mapcat :gaps) steps)}))
 
 (defn workflow->ci-model
   "Converts the YAML text of one Workflow into a validated CI Model.

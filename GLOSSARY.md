@@ -23,8 +23,12 @@ The tool's own platform-independent description of a project's CI (Jobs, Trigger
 _Avoid_: IR, intermediate representation, pipeline model
 
 **Action Translator**:
-The conversion for one specific Action into Job settings or script lines in the CI Model.
+The conversion for one specific Action into Job settings or script lines in the CI Model, plus a Gap for each input it cannot convert and an outcome saying what became of the Action (for example "dropped").
 _Avoid_: rule, handler, mapping
+
+**Converted Action**:
+An Action that an Action Translator converted, recorded on its Job with the translator's outcome and how many Gaps it raised; the Migration Report lists them per Job. An Action with no Action Translator is a Gap, not a Converted Action.
+_Avoid_: handled action, translated step
 
 **Runner Mapping**:
 The configured translation from a GitHub runner label (`runs-on`) to a GitLab image and runner tags.

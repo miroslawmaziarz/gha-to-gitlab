@@ -92,3 +92,13 @@ jobs:
     (is (= ["group: big" "group: big, labels: [linux, x64]"]
            (->> "on: push\njobs:\n  a:\n    runs-on:\n      group: big\n    steps:\n      - run: make\n  b:\n    runs-on:\n      group: big\n      labels: [linux, x64]\n    steps:\n      - run: make\n"
                 github/workflow->ci-model :jobs (map :runs-on))))))
+
+(deftest nothing-left-to-run-test
+  (let [model (github/workflow->ci-model
+               "on: push\njobs:\n  only:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n")]
+    (testing "a Job whose Steps all convert to no script lines gets one shell-safe line saying so"
+      (is (= ["echo 'Nothing left to run after conversion'"] (-> model :jobs first :script)))
+      (is (= {:exit 0 :out "Nothing left to run after conversion\n" :err ""}
+             (sh "bash" "-c" (-> model :jobs first :script first)))))
+    (testing "and no Gap, since dropping those Steps is faithful"
+      (is (= [] (:gaps model))))))
