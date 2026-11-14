@@ -21,8 +21,8 @@ jobs:
 
 (deftest workflow->ci-model-test
   (testing "each Job with run: Steps becomes a CI Model Job whose script is the commands in order"
-    (is (= {:jobs [{:id "build" :script ["npm ci" "npm run build"]}
-                   {:id "lint" :script ["npm run lint"]}]
+    (is (= {:jobs [{:id "build" :runs-on "ubuntu-latest" :script ["npm ci" "npm run build"]}
+                   {:id "lint" :runs-on "ubuntu-latest" :script ["npm run lint"]}]
             :gaps []}
            (github/workflow->ci-model two-job-workflow)))))
 
@@ -78,3 +78,17 @@ jobs:
   (testing "a Step with neither run: nor uses: is refused rather than silently dropped"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Job 'build' has a Step with neither run: nor uses:"
           (github/workflow->ci-model "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - name: nothing\n")))))
+
+(deftest runs-on-test
+  (testing "a runs-on list with one label is that label"
+    (is (= "macos-latest"
+           (-> "on: push\njobs:\n  b:\n    runs-on: [macos-latest]\n    steps:\n      - run: make\n"
+               github/workflow->ci-model :jobs first :runs-on))))
+  (testing "a runs-on with several labels keeps them joined, so it can still be mapped or reported"
+    (is (= "self-hosted, linux"
+           (-> "on: push\njobs:\n  b:\n    runs-on: [self-hosted, linux]\n    steps:\n      - run: make\n"
+               github/workflow->ci-model :jobs first :runs-on))))
+  (testing "a runner group keeps its keys in YAML-like form"
+    (is (= ["group: big" "group: big, labels: [linux, x64]"]
+           (->> "on: push\njobs:\n  a:\n    runs-on:\n      group: big\n    steps:\n      - run: make\n  b:\n    runs-on:\n      group: big\n      labels: [linux, x64]\n    steps:\n      - run: make\n"
+                github/workflow->ci-model :jobs (map :runs-on))))))

@@ -36,3 +36,17 @@
                 :gaps []}
                gitlab/ci-model->gitlab-ci-yaml
                yaml/parse-string)))))
+
+(deftest image-and-tags-test
+  (let [yaml-text (gitlab/ci-model->gitlab-ci-yaml
+                   {:jobs [{:id "build" :image "ubuntu:24.04" :tags [] :script ["make"]}
+                           {:id "mac" :image "macos-14" :tags ["saas-macos-medium-m1"] :script ["xcodebuild"]}
+                           {:id "bare" :script ["true"]}]
+                    :gaps []})]
+    (testing "a Job's image and non-empty tags are written; empty tags and a missing image are left out"
+      (is (= {:build {:image "ubuntu:24.04" :script ["make"]}
+              :mac {:image "macos-14" :tags ["saas-macos-medium-m1"] :script ["xcodebuild"]}
+              :bare {:script ["true"]}}
+             (yaml/parse-string yaml-text :keywords true))))
+    (testing "image and tags come before script"
+      (is (= [:image :tags :script] (keys (:mac (yaml/parse-string yaml-text))))))))

@@ -10,6 +10,23 @@
 (defn- step-label [step index]
   (str (or (:name step) (:id step) (str "step " (inc index)))))
 
+(defn- yaml-ish
+  "A YAML value as short flow-style text, e.g. `[linux, x64]`."
+  [v]
+  (if (sequential? v)
+    (str "[" (str/join ", " (map yaml-ish v)) "]")
+    (str v)))
+
+(defn- runner-label
+  "The `runs-on` of a Job as one label string: a list of labels is joined
+  with \", \"; a runner group is written in YAML-like form
+  (`group: big, labels: [linux, x64]`)."
+  [runs-on]
+  (cond
+    (sequential? runs-on) (str/join ", " runs-on)
+    (map? runs-on) (str/join ", " (map (fn [[k v]] (str (name k) ": " (yaml-ish v))) runs-on))
+    :else (str runs-on)))
+
 (defn- shell-quote
   "`s` as one single-quoted POSIX shell word."
   [s]
@@ -42,7 +59,9 @@
 (defn- convert-job [workflow-path [job-id job]]
   (let [id (name job-id)
         steps (map-indexed #(convert-step workflow-path id %1 %2) (:steps job))]
-    {:job {:id id :script (into [] (mapcat :script) steps)}
+    {:job (cond-> {:id id}
+            (some? (:runs-on job)) (assoc :runs-on (runner-label (:runs-on job)))
+            true (assoc :script (into [] (mapcat :script) steps)))
      :gaps (keep :gap steps)}))
 
 (defn workflow->ci-model

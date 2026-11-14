@@ -22,7 +22,7 @@ jobs:
     (defmethod action-translator/translate "example/greet" [step]
       {:script [(str "echo hello " (get-in step [:with :who]))]})
     (try
-      (is (= {:jobs [{:id "build" :script ["echo hello world" "echo hello GitLab"]}]
+      (is (= {:jobs [{:id "build" :runs-on "ubuntu-latest" :script ["echo hello world" "echo hello GitLab"]}]
               :gaps []}
              (github/workflow->ci-model greet-workflow)))
       (finally
