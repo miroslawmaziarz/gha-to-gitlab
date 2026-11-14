@@ -31,6 +31,12 @@
     :default-image "node:lts"
     :default-note "no `node-version` given, so the current LTS"
     :example "node:20"
+    :caches {"npm" {:files ["package-lock.json"] :paths [".npm"]
+                    :variables {"npm_config_cache" "$CI_PROJECT_DIR/.npm"}}
+             "yarn" {:files ["yarn.lock"] :paths [".yarn-cache"]
+                     ;; Yarn 2+ only uses the cache folder without its global cache
+                     :variables {"YARN_CACHE_FOLDER" "$CI_PROJECT_DIR/.yarn-cache"
+                                 "YARN_ENABLE_GLOBAL_CACHE" "false"}}}
     :inputs {"registry-url" {:hint registry-hint}
              "scope" {:hint registry-hint}
              "always-auth" {:hint registry-hint}}}))

@@ -69,6 +69,12 @@
     :version-file "java-version-file"
     :image java-image
     :example example
+    :caches {"maven" {:files ["**/pom.xml"] :paths [".m2/repository"]
+                      :variables {"MAVEN_OPTS" "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"}}
+             ;; setup-java also keys on more Gradle files; a GitLab key takes two
+             "gradle" {:files ["**/*.gradle*" "**/gradle-wrapper.properties"]
+                       :paths [".gradle/caches" ".gradle/wrapper"]
+                       :variables {"GRADLE_USER_HOME" "$CI_PROJECT_DIR/.gradle"}}}
     :inputs {"distribution" {:honoured any?} ; checked by java-image
              "java-package" {:honoured #{"jdk"}
                              :hint "choose an image with that package (such as a `-jre` tag) by hand"}

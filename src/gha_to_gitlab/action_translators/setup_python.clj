@@ -17,6 +17,13 @@
     :default-image "python:3"
     :default-note "no `python-version` given, so the latest Python 3"
     :example "python:3.12"
+    :caches {"pip" {:files ["**/requirements.txt"] :paths [".cache/pip"]
+                    :variables {"PIP_CACHE_DIR" "$CI_PROJECT_DIR/.cache/pip"}}
+             ;; setup-python caches the virtualenv; keep it in the project as `.venv`
+             "pipenv" {:files ["Pipfile.lock"] :paths [".venv"]
+                       :variables {"PIPENV_VENV_IN_PROJECT" "1"}}
+             "poetry" {:files ["poetry.lock"] :paths [".venv"]
+                       :variables {"POETRY_VIRTUALENVS_IN_PROJECT" "true"}}}
     :inputs {"update-environment" {:honoured #{"true"}
                                    :hint "the image's Python is already on `PATH`; set any variables the Job relied on by hand"}
              "allow-prereleases" {:honoured any?} ; only used when no release matches

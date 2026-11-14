@@ -17,11 +17,33 @@
   [id]
   (if (global-keywords id) (str id "_job") id))
 
-(defn- gitlab-job [{:keys [image tags script]}]
+(defn- in-order
+  "`m` as an ordered map with `ks` first, in that order, under their GitLab
+  names (`rename`, else the key itself); keys `m` lacks are left out."
+  ([m ks] (in-order m ks {}))
+  ([m ks rename]
+   (into (ordered-map)
+         (for [k ks :when (contains? m k)]
+           [(get rename k k) (get m k)]))))
+
+(defn- gitlab-cache [{:keys [key] :as cache}]
+  (in-order (cond-> cache (map? key) (update :key in-order [:files :prefix]))
+            [:key :paths :policy :when]))
+
+(defn- gitlab-job
+  "One GitLab Job, its keys in reading order: where it runs (image, tags),
+  its environment (variables), what it restores (cache), what it runs
+  (script), then what it keeps (artifacts)."
+  [{:keys [image tags variables script cache artifacts]}]
   (cond-> (ordered-map)
     image (assoc :image image)
     (seq tags) (assoc :tags tags)
-    true (assoc :script script)))
+    (seq variables) (assoc :variables (into (ordered-map) (sort variables)))
+    (= 1 (count cache)) (assoc :cache (gitlab-cache (first cache)))
+    (< 1 (count cache)) (assoc :cache (mapv gitlab-cache cache))
+    true (assoc :script script)
+    artifacts (assoc :artifacts (in-order artifacts [:name :paths :exclude :expire-in]
+                                          {:expire-in :expire_in}))))
 
 (defn- ci-model->job-map [model]
   (into (ordered-map)

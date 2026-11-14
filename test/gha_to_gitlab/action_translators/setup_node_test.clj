@@ -55,10 +55,7 @@
     (testing "the version still sets the image"
       (is (= "node:20" (-> model :jobs first :action-job-settings :image))))
     (testing "each input the image can't honour is a Gap naming it"
-      (is (= ["cache" "registry-url" "architecture" "new-input"] (map :input (:gaps model)))))
-    (testing "cache points at a Job cache"
-      (is (re-find #"input `cache: npm` has no GitLab equivalent: .*`actions/cache`"
-                   (-> model :gaps first :message)))))
+      (is (= ["registry-url" "architecture" "new-input"] (map :input (:gaps model))))))
   (testing "node-version-file is a Gap, and no image is set"
     (let [model (convert "      - uses: actions/setup-node@v4\n        with:\n          node-version-file: .nvmrc\n")]
       (is (nil? (-> model :jobs first :action-job-settings :image)))
