@@ -2,6 +2,7 @@
   "A Migration Run: Source → CI Model → Target, plus the Migration Report."
   (:refer-clojure :exclude [run!])
   (:require [clojure.java.io :as io]
+            [gha-to-gitlab.action-job-settings :as action-job-settings]
             [gha-to-gitlab.config :as config]
             [gha-to-gitlab.github :as github]
             [gha-to-gitlab.gitlab :as gitlab]
@@ -33,7 +34,8 @@
         workflow (single-workflow source-dir)
         workflow-path (str workflows-dir "/" (.getName workflow))
         model (-> (github/workflow->ci-model (slurp workflow) {:workflow-path workflow-path})
-                  (runner-mapping/apply-runner-mappings runner-mappings))
+                  (runner-mapping/apply-runner-mappings runner-mappings)
+                  action-job-settings/apply-action-job-settings)
         ci-file (io/file output-dir gitlab/ci-file-name)
         report-file (io/file output-dir report/file-name)]
     (.mkdirs (io/file output-dir))

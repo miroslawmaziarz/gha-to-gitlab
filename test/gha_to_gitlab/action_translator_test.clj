@@ -48,3 +48,40 @@ jobs:
                (-> model :jobs first :actions)))))
     (finally
       (remove-method action-translator/translate "example/greet"))))
+
+(deftest job-settings-test
+  (testing "a translator's :job-settings wait on the Job as :action-job-settings, and its Converted Action says which it set"
+    (defmethod action-translator/translate "example/tagger" [_step]
+      {:script [] :job-settings {:tags ["gpu"]}})
+    (try
+      (let [job (-> (github/workflow->ci-model
+                     "on: push\njobs:\n  build:\n    steps:\n      - uses: example/tagger@v1\n      - run: make\n")
+                    :jobs first)]
+        (is (= {:tags ["gpu"]} (:action-job-settings job)))
+        (is (nil? (:tags job)))
+        (is (= [[:tags]] (map :sets (:actions job)))))
+      (finally
+        (remove-method action-translator/translate "example/tagger")))))
+
+(deftest conflicting-job-settings-test
+  (let [model (github/workflow->ci-model
+               (str "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n"
+                    "      - name: Node\n        uses: actions/setup-node@v4\n        with:\n          node-version: 20\n"
+                    "      - name: Python\n        uses: actions/setup-python@v5\n        with:\n          python-version: '3.12'\n"
+                    "      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n"
+                    "      - run: make\n")
+               {:workflow-path ".github/workflows/ci.yml"})
+        job (-> model :jobs first)]
+    (testing "when two Actions in one Job set different images, the first Action's image stays"
+      (is (= {:image "node:20"} (:action-job-settings job))))
+    (testing "the later Action's conflicting image is a Gap at its Step; an identical image is not"
+      (is (= [{:workflow ".github/workflows/ci.yml" :job "build" :step "Python"
+               :action "actions/setup-python@v5"
+               :message (str "Workflow `.github/workflows/ci.yml`, Job `build`, Step `Python`: "
+                             "Action `actions/setup-python@v5` sets the Job's `image` to `python:3.12`, "
+                             "but Step `Node` (Action `actions/setup-node@v4`) already set it to `node:20`, "
+                             "which the Job keeps; use one image that has everything the Job needs, or split the Job.")}]
+             (:gaps model))))
+    (testing "the Converted Actions say which set the kept image, and count the Gap against the later Action"
+      (is (= [[:image] nil [:image]] (map :sets (:actions job))))
+      (is (= [0 1 0] (map :gap-count (:actions job)))))))

@@ -1,6 +1,6 @@
 (ns gha-to-gitlab.action-translator
   "The Action Translator extension point. An Action Translator converts one
-  Action into script lines, Gaps and (later) Job settings in the CI Model.
+  Action into script lines, Gaps and Job settings in the CI Model.
   Supporting a new Action means adding one `defmethod` on `translate`, keyed
   by the Action's name in lower case without its version suffix (GitHub
   owner and repository names are case-insensitive):
@@ -27,10 +27,15 @@
                           e.g. \"input `ref: main` has no GitLab equivalent: ...\".
                           An input a translator doesn't support must be a
                           Gap, never silently dropped.
-
-  Planned, not yet read by the Migration Run: `:job` for Job settings, e.g.
-  `{:image \"node:20\"}` from a setup Action, which overrides the Runner
-  Mapping image (ADR-0002), and cache and artifacts settings.
+    :job-settings {k v}   Job settings for the Step's Job, e.g.
+                          `{:image \"node:20\"}` from a setup Action; keys
+                          are CI Model Job keys (`gha-to-gitlab.ci-model/Job`).
+                          The Source reader settles them per Job into
+                          `:action-job-settings`: the earliest Action to set
+                          a setting wins, and a later Action setting it to a
+                          different value gets a Gap. They are applied after
+                          the Runner Mapping, so they win over it
+                          (`gha-to-gitlab.action-job-settings`, ADR-0002).
 
   An Action with no translator falls through to the default method, which
   returns nil, and the Migration Run records it as a Gap.
@@ -46,7 +51,7 @@
   (str/lower-case (first (str/split uses #"@" 2))))
 
 (defmulti translate
-  "Converts a Step that uses an Action into `{:script :outcome :gaps}` (see
+  "Converts a Step that uses an Action into `{:script :outcome :gaps :job-settings}` (see
   the namespace docstring), or returns nil when no Action Translator exists
   for that Action."
   (fn [step] (action-name (:uses step))))

@@ -96,3 +96,37 @@
       (testing "an Action with no Action Translator is not listed as converted"
         (is (not (str/includes? report "Step `step 3`: Action `acme/unknown@v1` dropped")))
         (is (not (re-find #"(?m)^  - Step `step 3`" report)))))))
+
+(deftest setup-action-image-migration-run-test
+  (let [out (temp-dir)]
+    (migration/run! {:source-dir (source-with-workflow
+                                  (str "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n"
+                                       "      - uses: actions/checkout@v4\n"
+                                       "      - name: Node\n        uses: actions/setup-node@v4\n"
+                                       "        with:\n          node-version: 20\n"
+                                       "      - run: npm test\n"
+                                       "  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n"))
+                     :output-dir out})
+    (testing "the setup Action's image replaces the Runner Mapping image for its Job only"
+      (is (= {:build {:image "node:20" :script ["npm test"]}
+              :lint {:image "ubuntu:24.04" :script ["make lint"]}}
+             (yaml/parse-string (slurp (io/file out ".gitlab-ci.yml"))))))
+    (testing "the Migration Report's Job line shows the override and where it came from"
+      (is (str/includes? (slurp (io/file out "MIGRATION_REPORT.md"))
+                         (str "- `build`: 1 script line; runs on `ubuntu-latest` → image `node:20` from Step `Node` "
+                              "(Action `actions/setup-node@v4`, overriding the Runner Mapping image `ubuntu:24.04`), no tags\n"
+                              "  - Step `step 1`: Action `actions/checkout@v4` dropped (GitLab checks out the repository automatically)\n"
+                              "  - Step `Node`: Action `actions/setup-node@v4` converted to the Job image `node:20`\n"
+                              "- `lint`: 1 script line; runs on `ubuntu-latest` → image `ubuntu:24.04`, no tags"))))))
+
+(deftest setup-action-image-without-runner-mapping-report-test
+  (let [out (temp-dir)]
+    (migration/run! {:source-dir (source-with-workflow
+                                  (str "on: push\njobs:\n  mac:\n    runs-on: macos-latest\n    steps:\n"
+                                       "      - uses: actions/setup-node@v4\n        with:\n          node-version: 22\n"
+                                       "      - run: npm test\n"))
+                     :output-dir out})
+    (testing "a Job with no Runner Mapping still shows the image its Action set"
+      (is (str/includes? (slurp (io/file out "MIGRATION_REPORT.md"))
+                         (str "- `mac`: 1 script line; runs on `macos-latest` → no Runner Mapping (see Gaps); "
+                              "image `node:22` from Step `step 1` (Action `actions/setup-node@v4`)\n"))))))

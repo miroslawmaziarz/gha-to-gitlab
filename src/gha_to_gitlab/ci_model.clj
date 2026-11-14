@@ -8,19 +8,29 @@
   "An Action that an Action Translator converted, as the Migration Report
   lists it: the Step and `uses:` value, the translator's `:outcome` (such as
   \"dropped (GitLab checks out the repository automatically)\") and how many
-  Gaps the translator raised for it."
+  Gaps the translator raised for it. `:sets` names the Job settings the
+  Action supplied and the Job kept (such as `[:image]`), so the Migration
+  Report can say where a setting came from; the values themselves are in
+  the Job's `:action-job-settings` (ADR-0003)."
   [:map {:closed true}
    [:step :string]
    [:action :string]
    [:outcome [:string {:min 1}]]
-   [:gap-count nat-int?]])
+   [:gap-count nat-int?]
+   [:sets {:optional true} [:vector :keyword]]])
 
 (def Job
   [:map {:closed true}
    [:id [:string {:min 1}]]
    [:runs-on {:optional true} :string]
    [:image {:optional true} [:string {:min 1}]]
+   ;; the Runner Mapping's image, kept when an Action's image overrides it
+   [:runner-mapping-image {:optional true} [:string {:min 1}]]
    [:tags {:optional true} [:vector :string]]
+   ;; Job settings the Job's Actions asked for (one value per setting), not
+   ;; yet applied; `gha-to-gitlab.action-job-settings` applies them after
+   ;; the Runner Mapping and removes this key
+   [:action-job-settings {:optional true} [:map-of :keyword any?]]
    [:script [:vector {:min 1} :string]]
    [:actions {:optional true} [:vector ConvertedAction]]])
 

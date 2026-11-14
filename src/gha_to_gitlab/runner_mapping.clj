@@ -1,6 +1,8 @@
 (ns gha-to-gitlab.runner-mapping
   "Runner Mapping: translates each Job's GitHub runner label (`runs-on`) into
-  a GitLab image and runner tags on the CI Model."
+  a GitLab image and runner tags on the CI Model. Job settings that Actions
+  asked for (such as a setup Action's image) are applied afterwards by
+  `gha-to-gitlab.action-job-settings` and win (ADR-0002)."
   (:require [clojure.string :as str]))
 
 (def default-runner-mappings
@@ -21,12 +23,15 @@
               (:image (get default-runner-mappings "ubuntu-latest")))
      :tags []}))
 
-(defn- unmapped-gap [{:keys [id runs-on]}]
+(defn- unmapped-gap [{:keys [id runs-on action-job-settings]}]
   {:message (if (str/includes? runs-on "${{")
               (str "Job `" id "` runs on the expression `" runs-on "`, which is only known "
                    "when the Workflow runs; resolve it and set the Job's image and tags by hand.")
               (str "Job `" id "` runs on `" runs-on "`, which has no Runner Mapping; "
-                   "add one in the Migration Config or set the Job's image and tags by hand."))})
+                   "add one in the Migration Config or "
+                   (if (:image action-job-settings)
+                     "set the Job's tags by hand (a setup Action sets its image)."
+                     "set the Job's image and tags by hand.")))})
 
 (defn- map-job [mappings model job]
   (let [label (:runs-on job)]
