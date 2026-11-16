@@ -2,8 +2,8 @@
   "Action Translator for `actions/checkout`: GitLab checks out the
   repository before every Job, so the Step is dropped. An input GitLab's
   automatic checkout can't honour is a Gap instead of being lost."
-  (:require [clojure.string :as str]
-            [gha-to-gitlab.action-translator :as action-translator]))
+  (:require [gha-to-gitlab.action-translator :as action-translator]
+            [gha-to-gitlab.action-translators.inputs :as inputs]))
 
 (def ^:private inputs
   "Per input: `:honoured`, a predicate on the value (as a string) that is
@@ -29,22 +29,8 @@
 (def ^:private default-hint
   "GitLab's automatic checkout can't do this; check the Job works without it")
 
-(defn- one-line
-  "`value` as text on one line, so it stays inside one Migration Report bullet."
-  [value]
-  (str/join " " (str/split (str/trim (str value)) #"\s*\n\s*")))
-
-(defn- input-gap [input value]
-  {:input input
-   :message (str "input `" input ": " (one-line value) "` has no GitLab equivalent: "
-                 (get-in inputs [input :hint] default-hint) ".")})
-
 (defmethod action-translator/translate "actions/checkout"
   [{:keys [with]}]
   {:script []
    :outcome "dropped (GitLab checks out the repository automatically)"
-   :gaps (vec (for [[k v] with
-                    :let [input (name k)
-                          honoured? (get-in inputs [input :honoured])]
-                    :when (not (and honoured? (honoured? (str v))))]
-                (input-gap input v)))})
+   :gaps (inputs/unhonoured-gaps (update-keys with name) inputs #{} default-hint)})

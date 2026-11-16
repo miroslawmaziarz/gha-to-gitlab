@@ -4,6 +4,7 @@
   With no `node-version` the Job gets `node:lts`."
   (:require [clojure.string :as str]
             [gha-to-gitlab.action-translator :as action-translator]
+            [gha-to-gitlab.action-translators.package-caches :as package-caches]
             [gha-to-gitlab.action-translators.setup :as setup]))
 
 (defn- node-tag
@@ -31,6 +32,7 @@
     :default-image "node:lts"
     :default-note "no `node-version` given, so the current LTS"
     :example "node:20"
+    :caches (select-keys package-caches/package-managers ["npm" "yarn"])
     :inputs {"registry-url" {:hint registry-hint}
              "scope" {:hint registry-hint}
              "always-auth" {:hint registry-hint}}}))

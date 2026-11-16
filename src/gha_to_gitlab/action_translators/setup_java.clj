@@ -8,6 +8,8 @@
   every image publishes such tags."
   (:require [clojure.string :as str]
             [gha-to-gitlab.action-translator :as action-translator]
+            [gha-to-gitlab.action-translators.inputs :as inputs]
+            [gha-to-gitlab.action-translators.package-caches :as package-caches]
             [gha-to-gitlab.action-translators.setup :as setup]))
 
 (def ^:private image-templates
@@ -41,7 +43,7 @@
       (nil? distribution)
       {:gaps [(setup/missing-input-gap "distribution" example)]}
       (nil? image-for)
-      {:gaps [(setup/input-gap "distribution" distribution
+      {:gaps [(inputs/input-gap "distribution" distribution
                                (str "no image template for this distribution (templates exist for "
                                     (str/join ", " (map #(str "`" % "`") (sort (keys image-templates))))
                                     "); set the Job's image by hand"))]}
@@ -49,7 +51,7 @@
       {:gaps [(setup/version-gap spec version)]}
       more-precise?
       {:image (image-for tag)
-       :gaps [(setup/input-gap "java-version" version
+       :gaps [(inputs/input-gap "java-version" version
                                (str "JDK image tags name the feature release, so the Job uses `"
                                     (image-for tag) "` (its latest update); pin an exact image tag by hand"
                                     " if the Job needs " version))]}
@@ -69,6 +71,7 @@
     :version-file "java-version-file"
     :image java-image
     :example example
+    :caches (select-keys package-caches/package-managers ["maven" "gradle"])
     :inputs {"distribution" {:honoured any?} ; checked by java-image
              "java-package" {:honoured #{"jdk"}
                              :hint "choose an image with that package (such as a `-jre` tag) by hand"}

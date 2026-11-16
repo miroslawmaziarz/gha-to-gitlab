@@ -130,3 +130,35 @@
       (is (str/includes? (slurp (io/file out "MIGRATION_REPORT.md"))
                          (str "- `mac`: 1 script line; runs on `macos-latest` → no Runner Mapping (see Gaps); "
                               "image `node:22` from Step `step 1` (Action `actions/setup-node@v4`)\n"))))))
+
+(deftest cache-and-artifacts-migration-run-test
+  (let [out (temp-dir)]
+    (migration/run! {:source-dir (source-with-workflow
+                                  (str "on: push\njobs:\n  web:\n    runs-on: ubuntu-latest\n    steps:\n"
+                                       "      - name: Node\n        uses: actions/setup-node@v4\n"
+                                       "        with:\n          node-version: 20\n          cache: npm\n"
+                                       "      - name: Build cache\n        uses: actions/cache@v4\n        with:\n"
+                                       "          path: .next/cache\n"
+                                       "          key: ${{ runner.os }}-next-${{ hashFiles('package-lock.json') }}\n"
+                                       "      - run: npm ci && npm run build\n"
+                                       "      - name: Upload\n        uses: actions/upload-artifact@v4\n        with:\n"
+                                       "          name: dist\n          path: dist/\n          retention-days: 7\n          include-hidden-files: true\n"))
+                     :output-dir out})
+    (testing "the setup Action's cache, actions/cache and actions/upload-artifact become the Job's variables, caches and artifacts"
+      (is (= (str "web:\n"
+                  "  image: node:20\n"
+                  "  variables:\n    npm_config_cache: $CI_PROJECT_DIR/.npm\n"
+                  "  cache:\n"
+                  "  - key:\n      files:\n      - package-lock.json\n      prefix: npm\n    paths:\n    - .npm\n"
+                  "  - key:\n      files:\n      - package-lock.json\n      prefix: next\n    paths:\n    - .next/cache\n"
+                  "  script:\n  - npm ci && npm run build\n"
+                  "  artifacts:\n    name: dist\n    paths:\n    - dist/\n    expire_in: 7 days\n")
+             (slurp (io/file out ".gitlab-ci.yml")))))
+    (testing "the Migration Report lists each Action's outcome, and there are no Gaps"
+      (let [report (slurp (io/file out "MIGRATION_REPORT.md"))]
+        (is (str/includes? report
+                           (str "  - Step `Node`: Action `actions/setup-node@v4` converted to the Job image `node:20` and a Job cache for npm\n"
+                                "  - Step `Build cache`: Action `actions/cache@v4` converted to a Job cache "
+                                "(its key leaves out `runner.os`, which GitLab has no Variable for)\n"
+                                "  - Step `Upload`: Action `actions/upload-artifact@v4` converted to the Job artifacts\n")))
+        (is (str/includes? report "No Gaps"))))))

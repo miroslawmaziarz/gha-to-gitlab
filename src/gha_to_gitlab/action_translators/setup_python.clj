@@ -5,6 +5,7 @@
   Job gets `python:3`. PyPy, GraalPy, prereleases, ranges and lists of
   versions are Gaps."
   (:require [gha-to-gitlab.action-translator :as action-translator]
+            [gha-to-gitlab.action-translators.package-caches :as package-caches]
             [gha-to-gitlab.action-translators.setup :as setup]))
 
 (defmethod action-translator/translate "actions/setup-python"
@@ -17,6 +18,7 @@
     :default-image "python:3"
     :default-note "no `python-version` given, so the latest Python 3"
     :example "python:3.12"
+    :caches (select-keys package-caches/package-managers ["pip" "pipenv" "poetry"])
     :inputs {"update-environment" {:honoured #{"true"}
                                    :hint "the image's Python is already on `PATH`; set any variables the Job relied on by hand"}
              "allow-prereleases" {:honoured any?} ; only used when no release matches

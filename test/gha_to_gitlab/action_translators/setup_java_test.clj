@@ -42,7 +42,7 @@
                               "          cache: maven\n          server-id: central\n"
                               "          gpg-private-key: ${{ secrets.GPG }}\n          java-package2: x\n"))]
       (is (= "eclipse-temurin:21" (-> model :jobs first :action-job-settings :image)))
-      (is (= ["cache" "server-id" "gpg-private-key" "java-package2"] (map :input (:gaps model))))))
+      (is (= ["server-id" "gpg-private-key" "java-package2"] (map :input (:gaps model))))))
   (testing "java-package other than jdk is a Gap"
     (is (= ["java-package"]
            (map :input (:gaps (convert (str "        with:\n          distribution: temurin\n"

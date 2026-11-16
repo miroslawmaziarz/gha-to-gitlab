@@ -33,7 +33,11 @@
                           The Source reader settles them per Job into
                           `:action-job-settings`: the earliest Action to set
                           a setting wins, and a later Action setting it to a
-                          different value gets a Gap. They are applied after
+                          different value gets a Gap. List settings such as
+                          `:cache` collect every Action's entries instead
+                          (`ci-model/list-settings`), and map settings such
+                          as `:variables` combine them, a clashing entry
+                          being a Gap (`ci-model/map-settings`). They are applied after
                           the Runner Mapping, so they win over it
                           (`gha-to-gitlab.action-job-settings`, ADR-0002).
 

@@ -19,6 +19,49 @@
    [:gap-count nat-int?]
    [:sets {:optional true} [:vector :keyword]]])
 
+(def cache-key-files-limit
+  "The most files a Job cache key can depend on (`cache:key:files`), as
+  current GitLab allows."
+  10)
+
+(def Cache
+  "One Job cache: the paths it holds and the key it is stored under, in
+  GitLab's shape (ADR-0004)."
+  [:map {:closed true}
+   ;; a fixed key, or one GitLab derives from the contents of up to
+   ;; `cache-key-files-limit` files
+   [:key [:or [:string {:min 1}]
+          [:map {:closed true}
+           [:files [:vector {:min 1 :max cache-key-files-limit} :string]]
+           [:prefix {:optional true} [:string {:min 1}]]]]]
+   [:paths [:vector {:min 1} :string]]
+   ;; restore only (pull) or save only (push); missing: both
+   [:policy {:optional true} [:enum "pull" "push"]]
+   ;; save even when the Job fails; missing: only when it succeeds
+   [:when {:optional true} [:enum "always"]]])
+
+(def Artifacts
+  "The Job's artifacts: the paths kept after the Job, minus `:exclude`, in
+  GitLab's shape (ADR-0004)."
+  [:map {:closed true}
+   [:name {:optional true} [:string {:min 1}]]
+   [:paths [:vector {:min 1} :string]]
+   [:exclude {:optional true} [:vector {:min 1} :string]]
+   ;; how long GitLab keeps them, e.g. "5 days"; missing: the instance default
+   [:expire-in {:optional true} [:string {:min 1}]]])
+
+(def list-settings
+  "Job settings that hold a list each Action adds its entries to, instead of
+  one value; per setting, the most entries a Job can hold (GitLab allows 4
+  caches per Job)."
+  {:cache 4})
+
+(def map-settings
+  "Job settings that hold a map each Action adds its entries to, instead of
+  one value (such as `:variables`); an entry two Actions set differently
+  keeps the earlier Action's value."
+  #{:variables})
+
 (def Job
   [:map {:closed true}
    [:id [:string {:min 1}]]
@@ -31,7 +74,11 @@
    ;; yet applied; `gha-to-gitlab.action-job-settings` applies them after
    ;; the Runner Mapping and removes this key
    [:action-job-settings {:optional true} [:map-of :keyword any?]]
+   ;; Variables the Job's scripts and tools read, name → value
+   [:variables {:optional true} [:map-of [:string {:min 1}] :string]]
    [:script [:vector {:min 1} :string]]
+   [:cache {:optional true} [:vector {:min 1 :max (:cache list-settings)} Cache]]
+   [:artifacts {:optional true} Artifacts]
    [:actions {:optional true} [:vector ConvertedAction]]])
 
 (def Gap

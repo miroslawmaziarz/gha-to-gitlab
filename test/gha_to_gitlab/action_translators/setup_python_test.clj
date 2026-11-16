@@ -41,7 +41,7 @@
                               "          update-environment: true\n          allow-prereleases: false\n"
                               "          pip-install: -r requirements.txt\n"))]
       (is (= "python:3.12" (-> model :jobs first :action-job-settings :image)))
-      (is (= ["cache" "architecture" "pip-install"] (map :input (:gaps model))))))
+      (is (= ["architecture" "pip-install"] (map :input (:gaps model))))))
   (testing "python-version-file is a Gap, and no image is set"
     (let [model (convert "      - uses: actions/setup-python@v5\n        with:\n          python-version-file: .python-version\n")]
       (is (nil? (-> model :jobs first :action-job-settings :image)))

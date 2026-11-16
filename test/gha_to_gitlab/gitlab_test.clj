@@ -50,3 +50,49 @@
              (yaml/parse-string yaml-text :keywords true))))
     (testing "image and tags come before script"
       (is (= [:image :tags :script] (keys (:mac (yaml/parse-string yaml-text))))))))
+
+(deftest cache-test
+  (let [yaml-text (gitlab/ci-model->gitlab-ci-yaml
+                   {:jobs [{:id "one" :image "node:20" :script ["npm ci"]
+                            :cache [{:paths [".npm"] :key {:prefix "node" :files ["package-lock.json"]}}]}
+                           {:id "two" :script ["make"]
+                            :cache [{:when "always" :policy "pull" :paths ["a"] :key "k1"}
+                                    {:paths ["b"] :key "k2"}]}]
+                    :gaps []})]
+    (testing "one cache is written as a map; several as a list"
+      (is (= {:one {:image "node:20"
+                    :cache {:key {:files ["package-lock.json"] :prefix "node"} :paths [".npm"]}
+                    :script ["npm ci"]}
+              :two {:cache [{:key "k1" :paths ["a"] :policy "pull" :when "always"}
+                            {:key "k2" :paths ["b"]}]
+                    :script ["make"]}}
+             (yaml/parse-string yaml-text :keywords true))))
+    (testing "cache comes before script, and its keys read key, paths, policy, when; key files before prefix"
+      (let [parsed (yaml/parse-string yaml-text)]
+        (is (= [:image :cache :script] (keys (:one parsed))))
+        (is (= [:files :prefix] (keys (get-in parsed [:one :cache :key]))))
+        (is (= [:key :paths :policy :when] (keys (first (get-in parsed [:two :cache])))))))))
+
+(deftest artifacts-test
+  (let [yaml-text (gitlab/ci-model->gitlab-ci-yaml
+                   {:jobs [{:id "build" :script ["make"] :cache [{:key "k" :paths ["c"]}]
+                            :artifacts {:expire-in "5 days" :exclude ["dist/*.map"] :paths ["dist/"] :name "dist"}}]
+                    :gaps []})
+        job (:build (yaml/parse-string yaml-text))]
+    (testing "artifacts are written with GitLab's names, after script, as name, paths, exclude, expire_in"
+      (is (= [:cache :script :artifacts] (keys job)))
+      (is (= {:name "dist" :paths ["dist/"] :exclude ["dist/*.map"] :expire_in "5 days"} (:artifacts job)))
+      (is (= [:name :paths :exclude :expire_in] (keys (:artifacts job)))))))
+
+(deftest variables-test
+  (testing "a Job's Variables are written, sorted by name, between tags and cache"
+    (let [job (-> {:jobs [{:id "build" :image "node:20" :script ["npm ci"]
+                           :variables {"npm_config_cache" "$CI_PROJECT_DIR/.npm" "A" "1"}
+                           :cache [{:key "k" :paths [".npm"]}]}]
+                   :gaps []}
+                  gitlab/ci-model->gitlab-ci-yaml
+                  yaml/parse-string
+                  :build)]
+      (is (= [:image :variables :cache :script] (keys job)))
+      (is (= [:A :npm_config_cache] (keys (:variables job))))
+      (is (= "$CI_PROJECT_DIR/.npm" (get-in job [:variables :npm_config_cache]))))))
