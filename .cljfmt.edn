@@ -1,0 +1,3 @@
+;; cljfmt settings (clojure -M:fmt check|fix)
+{:extra-indents {thrown? [[:block 1]]
+                 thrown-with-msg? [[:block 2]]}}

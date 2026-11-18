@@ -8,11 +8,14 @@
             [malli.error :as me]))
 
 (def RunnerMapping
+  "One Runner Mapping in the Migration Config: the GitLab image a runner
+  label becomes and, optionally, the runner tags."
   [:map {:closed true}
    [:image [:string {:min 1}]]
    [:tags {:optional true} [:vector :string]]])
 
 (def Config
+  "The Migration Config schema."
   [:map {:closed true}
    [:runner-mappings {:optional true} [:map-of :string RunnerMapping]]])
 

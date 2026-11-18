@@ -44,17 +44,17 @@
       {:gaps [(setup/missing-input-gap "distribution" example)]}
       (nil? image-for)
       {:gaps [(inputs/input-gap "distribution" distribution
-                               (str "no image template for this distribution (templates exist for "
-                                    (str/join ", " (map #(str "`" % "`") (sort (keys image-templates))))
-                                    "); set the Job's image by hand"))]}
+                                (str "no image template for this distribution (templates exist for "
+                                     (str/join ", " (map #(str "`" % "`") (sort (keys image-templates))))
+                                     "); set the Job's image by hand"))]}
       (nil? tag)
       {:gaps [(setup/version-gap spec version)]}
       more-precise?
       {:image (image-for tag)
        :gaps [(inputs/input-gap "java-version" version
-                               (str "JDK image tags name the feature release, so the Job uses `"
-                                    (image-for tag) "` (its latest update); pin an exact image tag by hand"
-                                    " if the Job needs " version))]}
+                                (str "JDK image tags name the feature release, so the Job uses `"
+                                     (image-for tag) "` (its latest update); pin an exact image tag by hand"
+                                     " if the Job needs " version))]}
       :else {:image (image-for tag)})))
 
 (def ^:private maven-settings-hint

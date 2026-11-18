@@ -1,0 +1,24 @@
+;; clj-kondo settings (clojure -M:lint). Turns on checks that are off by
+;; default; everything else keeps clj-kondo's defaults.
+{:linters {;; public functions and vars describe their interface
+           :missing-docstring {:level :warning}
+           ;; requires in alphabetical order
+           :unsorted-required-namespaces {:level :warning}
+           ;; a local named like a clojure.core var (e.g. `ns`, `name`)
+           ;; `key` is the domain's word for a cache key, so it may shadow
+           :shadowed-var {:level :warning :exclude [key]}
+           ;; (let [x ...] x), (if x true false), nested (let (let ...)) and the like
+           :redundant-fn-wrapper {:level :warning}
+           :redundant-call {:level :warning}
+           :redundant-str-call {:level :warning}
+           :redundant-nested-call {:level :warning}
+           :equals-true {:level :warning}
+           :single-key-in {:level :warning}
+           :docstring-leading-trailing-whitespace {:level :warning}
+           :used-underscored-binding {:level :warning}
+           :def-fn {:level :warning}
+           :plus-one {:level :warning}
+           :minus-one {:level :warning}}
+ ;; test namespaces: deftest and test data need no docstrings
+ :ns-groups [{:pattern ".*-test$" :name tests}]
+ :config-in-ns {tests {:linters {:missing-docstring {:level :off}}}}}

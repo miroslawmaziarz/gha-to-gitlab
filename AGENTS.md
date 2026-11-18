@@ -1,3 +1,7 @@
+## Code checks
+
+`bin/check` (cljfmt, clj-kondo, Splint, tests) must pass before a commit; the project's Claude Code hooks run it for you. When a check flags code, change the code; loosen `.clj-kondo/config.edn` or `.splint.edn` only for a rule that misreads this code base, with a comment saying why.
+
 ## Agent skills
 
 ### Issue tracker

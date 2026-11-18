@@ -10,9 +10,9 @@
   file (or `cache-dependency-path`), plus the Variables that point the tool
   at it (see `package-cache`)."
   (:require [clojure.string :as str]
-            [gha-to-gitlab.ci-model :as ci-model]
             [gha-to-gitlab.action-translators.inputs :as inputs]
-            [gha-to-gitlab.action-translators.paths :as paths]))
+            [gha-to-gitlab.action-translators.paths :as paths]
+            [gha-to-gitlab.ci-model :as ci-model]))
 
 (def common-inputs
   "Inputs several setup Actions share: `:honoured` is a predicate on the
@@ -42,10 +42,10 @@
   is the `translate-setup` spec."
   [{:keys [version-input example]} version]
   (inputs/input-gap version-input version
-             (if (str/includes? (str version) "${{")
-               (str "the version is only known when the Workflow runs; resolve it and "
-                    (set-image-by-hand example))
-               (str "an image needs one exact version; " (set-image-by-hand example)))))
+                    (if (str/includes? (str version) "${{")
+                      (str "the version is only known when the Workflow runs; resolve it and "
+                           (set-image-by-hand example))
+                      (str "an image needs one exact version; " (set-image-by-hand example)))))
 
 (defn- unquoted-number-gap
   "The Gap for a version YAML read as a non-integer number, which may have
@@ -92,9 +92,9 @@
           {dep-files :files dep-hint :hint} (when dependency-path (dependency-files dependency-path))]
       (cond
         (nil? known) {:gaps [(inputs/input-gap "cache" manager
-                                       (str "not one of the known package managers ("
-                                            (str/join ", " (map #(str "`" % "`") (sort (keys caches))))
-                                            "); " by-hand-cache-hint))]}
+                                               (str "not one of the known package managers ("
+                                                    (str/join ", " (map #(str "`" % "`") (sort (keys caches))))
+                                                    "); " by-hand-cache-hint))]}
         dep-hint {:gaps [(inputs/input-gap "cache-dependency-path" dependency-path dep-hint)]}
         :else {:manager (str/lower-case manager)
                :job-settings {:cache [{:key {:files (or dep-files files) :prefix (str/lower-case manager)}
@@ -125,7 +125,7 @@
           (and (number? version) (not (integer? version))) {:gaps [(unquoted-number-gap spec version)]}
           (some? version) (image spec with version)
           file {:gaps [(inputs/input-gap version-file file
-                                  (str "read the version from that file and " (set-image-by-hand example)))]}
+                                         (str "read the version from that file and " (set-image-by-hand example)))]}
           default-image {:image default-image}
           :else {:gaps [(missing-input-gap version-input example)]})
         {:keys [manager job-settings] cache-gaps :gaps} (package-cache spec with)

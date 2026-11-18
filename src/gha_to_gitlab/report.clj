@@ -3,7 +3,9 @@
   (:require [clojure.string :as str]
             [gha-to-gitlab.gitlab :as gitlab]))
 
-(def file-name "MIGRATION_REPORT.md")
+(def file-name
+  "The name of the Migration Report file."
+  "MIGRATION_REPORT.md")
 
 (defn- backticked [ids]
   (str/join ", " (map #(str "`" % "`") ids)))

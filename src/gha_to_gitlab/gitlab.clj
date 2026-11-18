@@ -4,7 +4,9 @@
             [flatland.ordered.map :refer [ordered-map]]
             [gha-to-gitlab.ci-model :as ci-model]))
 
-(def ci-file-name ".gitlab-ci.yml")
+(def ci-file-name
+  "The name of the CI file the GitLab writer produces."
+  ".gitlab-ci.yml")
 
 (def ^:private global-keywords
   "Top-level `.gitlab-ci.yml` keys that GitLab reads as settings, not Jobs."

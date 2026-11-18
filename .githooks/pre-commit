@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Git pre-commit hook: runs bin/check when the commit touches Clojure or EDN
+# files. Enable once per clone with: git config core.hooksPath .githooks
+# Skip in an emergency with: git commit --no-verify
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+if git diff --cached --quiet -- '*.clj' '*.cljc' '*.cljs' '*.edn'; then
+  exit 0
+fi
+echo "pre-commit: running bin/check (checks the working tree, not only staged changes)"
+exec bin/check

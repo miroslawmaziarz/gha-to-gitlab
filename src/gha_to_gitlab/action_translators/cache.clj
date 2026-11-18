@@ -11,11 +11,11 @@
   and losing it only costs speed. Other paths outside the project directory
   and key expressions GitLab has no Variable for are Gaps. A Job keeps up to 4 caches (`ci-model/list-settings`)."
   (:require [clojure.string :as str]
-            [gha-to-gitlab.ci-model :as ci-model]
             [gha-to-gitlab.action-translator :as action-translator]
             [gha-to-gitlab.action-translators.inputs :as inputs]
             [gha-to-gitlab.action-translators.package-caches :as package-caches]
-            [gha-to-gitlab.action-translators.paths :as paths]))
+            [gha-to-gitlab.action-translators.paths :as paths]
+            [gha-to-gitlab.ci-model :as ci-model]))
 
 (defn- path-problem
   "Why GitLab can't cache `path`, as a Gap hint; nil when it can."
@@ -55,7 +55,7 @@
   "The file patterns of a `hashFiles(...)` expression; nil for any other."
   [expr]
   (when-let [[_ args] (re-matches #"hashFiles\((.*)\)" expr)]
-    (mapv (fn [[_ single double]] (or single double))
+    (mapv (fn [[_ single-quoted double-quoted]] (or single-quoted double-quoted))
           (re-seq #"'([^']*)'|\"([^\"]*)\"" args))))
 
 (defn- key-parts
@@ -78,7 +78,7 @@
         exprs (keep #(when (vector? %) (second %)) parts)
         files (into [] (mapcat hash-files) exprs)
         unknown (first (remove #(or (hash-files %) (key-variables %) (runner-expressions %)) exprs))
-        text (-> (apply str (map #(if (vector? %) (get key-variables (second %) "") %) parts))
+        text (-> (str/join (map #(if (vector? %) (get key-variables (second %) "") %) parts))
                  (str/replace #"-{2,}" "-")
                  (str/replace #"^[-_.]+|[-_.]+$" ""))]
     (cond

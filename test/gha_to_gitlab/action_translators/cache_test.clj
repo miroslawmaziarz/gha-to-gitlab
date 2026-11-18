@@ -118,11 +118,11 @@
 
 (deftest several-caches-test
   (testing "each cache Step in a Job adds one cache to it, in Step order"
-    (let [model (convert (apply str (map cache-step [1 2])))]
+    (let [model (convert (str/join (map cache-step [1 2])))]
       (is (= [{:key "k1" :paths ["c1"]} {:key "k2" :paths ["c2"]}] (-> model :jobs first :action-job-settings :cache)))
       (is (= [] (:gaps model)))))
   (testing "a Job keeps at most 4 caches, as GitLab allows; a 5th is a Gap at its Step"
-    (let [model (convert (apply str (map cache-step [1 2 3 4 5])))]
+    (let [model (convert (str/join (map cache-step [1 2 3 4 5])))]
       (is (= ["k1" "k2" "k3" "k4"] (map :key (-> model :jobs first :action-job-settings :cache))))
       (is (= [(str "Workflow `.github/workflows/ci.yml`, Job `build`, Step `Cache 5`: Action `actions/cache@v4` "
                    "adds the 5th entry to the Job's `cache`, but GitLab allows at most 4; "

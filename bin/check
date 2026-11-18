@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Runs every code-quality check: formatting (cljfmt), lint (clj-kondo),
+# idioms (Splint) and the test suite. Exits non-zero when any check fails.
+# Used by the git pre-commit hook, CI and the Claude Code Stop hook.
+set -uo pipefail
+cd "$(dirname "$0")/.."
+
+status=0
+run() {
+  echo "==> $*"
+  "$@" || status=1
+}
+
+run clojure -M:fmt check
+run clojure -M:lint
+run clojure -M:splint src test
+run clojure -M:test
+exit $status

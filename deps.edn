@@ -7,6 +7,22 @@
  {:run {:main-opts ["-m" "gha-to-gitlab.cli"]}
   :lint {:replace-deps {clj-kondo/clj-kondo {:mvn/version "2024.11.14"}}
          :main-opts ["-m" "clj-kondo.main" "--lint" "src" "test"]}
+  ;; clj-kondo on the paths given, e.g. `clojure -M:kondo --lint src/x.clj`
+  :kondo {:replace-deps {clj-kondo/clj-kondo {:mvn/version "2024.11.14"}}
+          :main-opts ["-m" "clj-kondo.main"]}
+  ;; formatting: `clojure -M:fmt check` reports, `clojure -M:fmt fix` rewrites
+  :fmt {:replace-deps {dev.weavejester/cljfmt {:mvn/version "0.13.0"}}
+        :main-opts ["-m" "cljfmt.main"]}
+  ;; idiomatic-Clojure linter on the paths given, e.g. `clojure -M:splint src test`
+  ;; (configured in .splint.edn)
+  :splint {:replace-deps {io.github.noahtheduke/splint {:mvn/version "1.19.0"}
+                          org.clojure/clojure {:mvn/version "1.12.0"}}
+           :main-opts ["-m" "noahtheduke.splint"]}
+  ;; test coverage report in target/coverage
+  :coverage {:extra-paths ["test"]
+             :extra-deps {cloverage/cloverage {:mvn/version "1.2.4"}}
+             :main-opts ["-m" "cloverage.coverage" "-p" "src" "-s" "test"
+                         "--output" "target/coverage" "--text" "--html"]}
   :test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner
                       {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
