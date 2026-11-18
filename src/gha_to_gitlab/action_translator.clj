@@ -21,9 +21,10 @@
                           automatically)\"; defaults to \"converted\".
     :gaps     [gap ...]   what the translator could not convert, such as an
                           unsupported input. Each gap is `{:message ..}` plus
-                          optional `:input` (the input's name); `:message`
-                          continues a sentence that the Migration Run starts
-                          with the Step's location and \"Action `<uses>` \",
+                          optional `:input` (the input's name); any other
+                          key is dropped. `:message` continues a sentence
+                          that `gha-to-gitlab.gap/at` starts with the Step's
+                          location and \"Action `<uses>` \",
                           e.g. \"input `ref: main` has no GitLab equivalent: ...\".
                           An input a translator doesn't support must be a
                           Gap, never silently dropped.

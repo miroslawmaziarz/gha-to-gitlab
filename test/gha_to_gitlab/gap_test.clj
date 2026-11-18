@@ -18,9 +18,10 @@
                           "input `ref: main` has no GitLab equivalent.")}
            (gap/at {:workflow "ci.yml" :job "build" :step "Checkout" :action "actions/checkout@v4" :input "ref"}
                    "input `ref: main` has no GitLab equivalent."))))
-  (testing "location keys that are absent are left out"
+  (testing "location keys that are absent or nil are left out"
     (is (= {:job "j" :message "Job `j`: runs on `x`."}
-           (gap/at {:job "j" :workflow nil} "runs on `x`.")))))
+           (gap/at {:job "j"} "runs on `x`.")
+           (gap/at {:job "j" :workflow nil :step nil} "runs on `x`.")))))
 
 (deftest placeholder-line-test
   (testing "an Action with no Action Translator leaves a shell-safe script line naming it and the Migration Report"
