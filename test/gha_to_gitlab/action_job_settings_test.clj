@@ -55,3 +55,19 @@
                                      "`{npm_config_cache: $CI_PROJECT_DIR/.npm}`, which the Job keeps; "
                                      "settle on one value by hand.")}]}]
              results)))))
+
+(deftest own-variables-test
+  (let [{:keys [settings results]}
+        (action-job-settings/settle
+         {:variables {"npm_config_cache" "/cache" "A" "1"}}
+         [(request "Node" "actions/setup-node@v4" {:variables {"npm_config_cache" "$CI_PROJECT_DIR/.npm"}})
+          (request "Same" "acme/env@v1" {:variables {"A" "1" "B" "2"}})])]
+    (testing "an Action's Variable that the Job's own env: sets differently is left out; the settled settings exclude the Job's own"
+      (is (= {:variables {"A" "1" "B" "2"}} settings)))
+    (testing "the Action gets a Gap naming the env: value the Job keeps"
+      (is (= [{:kept []
+               :gaps [{:message (str "sets the Job's `variables` to `{npm_config_cache: $CI_PROJECT_DIR/.npm}`, "
+                                     "but `env:` already sets it to `{npm_config_cache: /cache}`, which the Job keeps; "
+                                     "settle on one value by hand.")}]}
+              {:kept [:variables] :gaps []}]
+             results)))))

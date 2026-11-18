@@ -63,12 +63,12 @@
 
 (defn- ci-model->ci-file-map
   "The `.gitlab-ci.yml` content: the Stages, when any Job has `:needs`,
-  then one entry per Job."
-  [model]
+  the Pipeline's Variables, when it has any, then one entry per Job."
+  [{:keys [variables] :as model}]
   (let [stages (job-stages model)]
-    (into (if stages
-            (ordered-map :stages (mapv stage-name (range 1 (inc (count (set (vals stages)))))))
-            (ordered-map))
+    (into (cond-> (ordered-map)
+            stages (assoc :stages (mapv stage-name (range 1 (inc (count (set (vals stages)))))))
+            (seq variables) (assoc :variables (into (ordered-map) (sort variables))))
           (map (fn [job] [(job-name (:id job)) (gitlab-job (get stages (:id job)) job)]))
           (:jobs model))))
 

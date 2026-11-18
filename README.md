@@ -2,7 +2,7 @@
 
 Convert a GitHub Actions Workflow to GitLab CI, with a Migration Report of everything that still needs a person. Written in Clojure.
 
-> **Status:** early. It converts one Workflow per Migration Run, including the most common Actions and each Job's runner. Triggers, Matrices, Variables, Job dependencies and `if:` conditions are not converted yet (see the open issues). See `GLOSSARY.md` for the domain language and `docs/adr/` for key decisions.
+> **Status:** early. It converts one Workflow per Migration Run, including the most common Actions and each Job's runner. Triggers, Matrices and `if:` conditions are not converted yet (see the open issues). See `GLOSSARY.md` for the domain language and `docs/adr/` for key decisions.
 
 ## What it does
 
@@ -18,6 +18,9 @@ Repositories, issues and pull requests are out of scope; GitLab's built-in GitHu
 |---|---|
 | `run:` Step | a script line |
 | `runs-on` | the Job's `image` and runner `tags` (Runner Mapping) |
+| Workflow / Job `env:` | Pipeline / Job `variables` |
+| Step `env:` | Job `variables`, when no other value of the name is lost; a Gap otherwise |
+| `${{ env.X }}`, `${{ secrets.X }}` in commands and `env:` | `${X}`, plus one Gap per Secret to create it as a masked Variable |
 | `needs:` | the Job's `needs:`, plus derived `stages` (`stage-1`, `stage-2`, …) so every Job runs after the Jobs it needs |
 | `actions/checkout` | dropped: GitLab checks out the repository itself |
 | `actions/setup-node`, `setup-python`, `setup-java` | the Job's `image` (`node:20`, `python:3.12`, `eclipse-temurin:21`, …), overriding the Runner Mapping image |
@@ -153,7 +156,7 @@ clojure -M:run --config migration.edn path/to/github-clone path/to/output
 ### Current limits
 
 - The clone must contain exactly one Workflow under `.github/workflows/` (#10).
-- Not converted yet: Triggers (#7), Variables and Secrets (#6), Matrices (#8), and `if:` conditions on Jobs and Steps (#9, #17). A Step's `if:` is ignored without a Gap.
+- Not converted yet: Triggers (#7), Matrices (#8), and `if:` conditions on Jobs and Steps (#9, #17). A Step's `if:` is ignored without a Gap.
 - `cache: pnpm` and `cache: sbt` on setup Actions, and cache paths outside the project, have no faithful GitLab form, so they become Gaps. `restore-keys` is dropped with a note in the Action's outcome.
 - Generated settings follow current GitLab (for example, up to 10 files in `cache:key:files`). Older self-managed instances may need adjustments.
 
@@ -183,6 +186,7 @@ Conversion always goes Source → CI Model → Target (ADR-0001). The code still
 - `gha-to-gitlab.action-translators`: requires every Action Translator; adding one means a new namespace under `action-translators/` plus one require here
 - `gha-to-gitlab.runner-mapping`: applies Runner Mappings to the CI Model's Jobs
 - `gha-to-gitlab.action-job-settings`: Action Job settings (image, cache, artifacts, Variables): settles them per Job (the earliest Action wins, GitLab limits, conflict Gaps) and applies them after the Runner Mapping (ADR-0002)
+- `gha-to-gitlab.variables`: `env:` as Variables (lifting a Step's into its Job), `${{ env.X }}`/`${{ secrets.X }}` rewriting and Secret Gaps
 - `gha-to-gitlab.config`: reads and validates the optional Migration Config
 - `gha-to-gitlab.gitlab`: writes the CI Model as `.gitlab-ci.yml`
 - `gha-to-gitlab.report`: renders the Migration Report

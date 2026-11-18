@@ -7,6 +7,7 @@
             [gha-to-gitlab.action-translators]
             [gha-to-gitlab.ci-model :as ci-model]
             [gha-to-gitlab.gap :as gap]
+            [gha-to-gitlab.variables :as variables]
             [gha-to-gitlab.wording :as wording]))
 
 (defn- step-label [step index]
@@ -58,7 +59,7 @@
   Action that an Action Translator converted."
   [workflow-path job-id index step]
   (cond
-    (:run step) {:script [(:run step)]}
+    (:run step) {:script [(variables/rewrite-references (:run step))]}
     (:uses step) (let [location (step-location workflow-path job-id step index)]
                    (if-let [translation (action-translator/translate step)]
                      (translated-action location translation)
@@ -83,13 +84,14 @@
 
 (defn- settle-job-settings
   "Settles the Job settings the Job's Actions asked for (`:job-settings`)
-  with `action-job-settings/settle`, returned as `:settings`, with `:steps`
+  with `action-job-settings/settle`, against the Job's `own` settings from
+  `env:`, returned as `:settings`, with `:steps`
   updated: each Converted Action's `:sets` names the settings the Job kept
   from it, and a Gap it raised is placed at its Step and counted on it."
-  [steps]
+  [own steps]
   (let [{:keys [settings results]}
-        (action-job-settings/settle (for [{converted :action :keys [job-settings]} steps]
-                                      {:step (:step converted) :action (:action converted) :settings job-settings}))]
+        (action-job-settings/settle own (for [{converted :action :keys [job-settings]} steps]
+                                          {:step (:step converted) :action (:action converted) :settings job-settings}))]
     {:settings settings
      :steps (mapv (fn [{:keys [location] :as step} {:keys [kept gaps]}]
                     (cond-> step
@@ -109,25 +111,47 @@
           (str "needs Job `" needed "`, which the Workflow does not define; the Job no longer waits for it,"
                " so add the dependency by hand.")))
 
+(defn- variables-of-job
+  "The Job's Variables and the Gaps raised for them (see
+  `variables/job-variables`), given the Workflow's Variables."
+  [workflow-path workflow-variables id job]
+  (variables/job-variables
+   {:workflow workflow-variables :job (variables/env->variables (:env job))}
+   (for [[index step] (map-indexed vector (:steps job))
+         :when (seq (:env step))]
+     {:location {:workflow workflow-path :job id :step (step-label step index)}
+      :variables (variables/env->variables (:env step))})))
+
 (defn- convert-job
   "Converts one Job into `{:job .. :gaps [..]}`. `job-ids` are the ids of
   every Job in the Workflow; a `needs:` entry naming any other Job is a Gap
   and is left out of the Job's `:needs`."
-  [workflow-path job-ids [job-id job]]
+  [workflow-path workflow-variables job-ids [job-id job]]
   (let [id (name job-id)
+        job-variables (variables-of-job workflow-path workflow-variables id job)
         {needs true missing false} (group-by (comp boolean job-ids)
                                              (some-> (:needs job) job-needs))
         {:keys [steps settings]} (->> (:steps job)
                                       (map-indexed #(convert-step workflow-path id %1 %2))
-                                      settle-job-settings)]
+                                      (settle-job-settings
+                                       {:variables (merge workflow-variables (:variables job-variables))}))]
     {:job (cond-> {:id id :workflow workflow-path}
             (some? (:runs-on job)) (assoc :runs-on (runner-label (:runs-on job)))
             (seq needs) (assoc :needs needs)
+            (seq (:variables job-variables)) (assoc :variables (:variables job-variables))
             true (assoc :script (job-script steps))
             (some :action steps) (assoc :actions (into [] (keep :action) steps))
             (seq settings) (assoc :action-job-settings settings))
-     :gaps (into (mapv #(missing-job-gap workflow-path id %) missing)
-                 (mapcat :gaps) steps)}))
+     :gaps (-> (mapv #(missing-job-gap workflow-path id %) missing)
+               (into (:gaps job-variables))
+               (into (mapcat :gaps) steps))}))
+
+(defn- source-texts
+  "The texts of a Job that can reference Secrets: its `env:` values, then
+  each Step's `env:` values and command."
+  [job]
+  (concat (vals (:env job))
+          (mapcat #(concat (vals (:env %)) [(:run %)]) (:steps job))))
 
 (defn workflow->ci-model
   "Converts the YAML text of one Workflow into a validated CI Model; Jobs
@@ -138,7 +162,13 @@
   ([workflow-yaml {:keys [workflow-path] :or {workflow-path "workflow"}}]
    (let [workflow (yaml/parse-string workflow-yaml)
          job-ids (into #{} (map (comp name key)) (:jobs workflow))
-         jobs (mapv #(convert-job workflow-path job-ids %) (:jobs workflow))]
+         workflow-variables (variables/env->variables (:env workflow))
+         jobs (mapv #(convert-job workflow-path workflow-variables job-ids %) (:jobs workflow))]
      (ci-model/validate!
-      {:jobs (mapv :job jobs)
-       :gaps (into [] (mapcat :gaps) jobs)}))))
+      (cond-> {:jobs (mapv :job jobs)
+               :gaps (into (into [] (mapcat :gaps) jobs)
+                           (variables/secret-gaps workflow-path
+                                                  (cons {:texts (vals (:env workflow))}
+                                                        (for [[job-id job] (:jobs workflow)]
+                                                          {:job (name job-id) :texts (source-texts job)}))))}
+        (seq workflow-variables) (assoc :variables workflow-variables))))))

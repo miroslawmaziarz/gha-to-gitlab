@@ -7,8 +7,9 @@
             [gha-to-gitlab.wording :as wording]))
 
 (def ^:private location-keys
-  "The keys of a Gap's location, from the widest place to the narrowest."
-  [:workflow :job :step :action :input])
+  "The keys of a Gap's location, from the widest place to the narrowest;
+  `:secret` names the Secret a Gap is about."
+  [:workflow :job :step :action :input :secret])
 
 (defn- prefix
   "The start of a Gap message naming its location, e.g. \"Workflow `ci.yml`,
@@ -22,8 +23,8 @@
          (when action (str "Action `" action "` ")))))
 
 (defn at
-  "The Gap at `location` (any of `:workflow`, `:job`, `:step`, `:action`
-  and `:input`, the Action input it is about) with `text`, what went wrong
+  "The Gap at `location` (any of `:workflow`, `:job`, `:step`, `:action`,
+  `:input`, the Action input it is about, and `:secret`) with `text`, what went wrong
   and what a person should do. Its `:message` names the location first;
   with an `:action`, `text` continues a sentence about the Action (\"has no
   Action Translator; ...\"). Absent location keys are left out."
