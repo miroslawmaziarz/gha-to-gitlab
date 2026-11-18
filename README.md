@@ -187,7 +187,7 @@ Conversion always goes Source → CI Model → Target (ADR-0001). The code still
 - `gha-to-gitlab.gitlab`: writes the CI Model as `.gitlab-ci.yml`
 - `gha-to-gitlab.report`: renders the Migration Report
 - `gha-to-gitlab.gap`: makes every Gap from its location and text, so all Gaps name their place the same way (ADR-0006)
-- `gha-to-gitlab.wording`: small helpers that write Source values as short text (Gap messages, runner labels)
+- `gha-to-gitlab.wording`: small text helpers shared by the conversion (Source values as short text, ordinals, shell quoting)
 - `gha-to-gitlab.migration`: one Migration Run, end to end: `convert` turns Workflow text and a Migration Config into the CI Model and output texts with no file access; `run!` reads the clone and writes the files around it
 - `gha-to-gitlab.cli`: command-line entry point
 
