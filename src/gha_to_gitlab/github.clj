@@ -174,17 +174,63 @@
           {:steps [] :settings {} :set-by {}}
           steps))
 
-(defn- convert-job [workflow-path [job-id job]]
+(defn- job-needs
+  "The Job ids in a Job's `needs:`, which is one id or a list of them."
+  [needs]
+  (mapv str (if (sequential? needs) needs [needs])))
+
+(defn- missing-job-gap [workflow-path job-id needed]
+  {:workflow workflow-path
+   :job job-id
+   :message (str "Workflow `" workflow-path "`, Job `" job-id "`: needs Job `" needed
+                 "`, which the Workflow does not define; the Job no longer waits for it,"
+                 " so add the dependency by hand.")})
+
+(defn- convert-job
+  "Converts one Job into `{:job .. :gaps [..]}`. `job-ids` are the ids of
+  every Job in the Workflow; a `needs:` entry naming any other Job is a Gap
+  and is left out of the Job's `:needs`."
+  [workflow-path job-ids [job-id job]]
   (let [id (name job-id)
+        {needs true missing false} (group-by (comp boolean job-ids)
+                                             (some-> (:needs job) job-needs))
         {:keys [steps settings]} (->> (:steps job)
                                       (map-indexed #(convert-step workflow-path id %1 %2))
                                       resolve-job-settings)]
     {:job (cond-> {:id id}
             (some? (:runs-on job)) (assoc :runs-on (runner-label (:runs-on job)))
+            (seq needs) (assoc :needs needs)
             true (assoc :script (job-script steps))
             (some :action steps) (assoc :actions (into [] (keep :action) steps))
             (seq settings) (assoc :action-job-settings settings))
-     :gaps (into [] (mapcat :gaps) steps)}))
+     :gaps (into (mapv #(missing-job-gap workflow-path id %) missing)
+                 (mapcat :gaps) steps)}))
+
+(defn- peel
+  "`needs` (Job id → the ids it needs) without the Jobs `done?` says are
+  settled, repeatedly, until none is left to remove."
+  [needs done?]
+  (loop [needs needs]
+    (let [settled (into #{} (comp (filter #(done? needs %)) (map key)) needs)]
+      (if (empty? settled)
+        needs
+        (recur (apply dissoc needs settled))))))
+
+(defn- check-no-cycle!
+  "Throws ex-info naming the Jobs that need each other in a cycle, as GitHub
+  refuses such a Workflow; deriving Stages needs an order."
+  [jobs]
+  (let [cycle (-> (into {} (map (juxt :id #(set (:needs %)))) jobs)
+                  ;; Jobs whose needs are all settled run in some Stage
+                  (peel (fn [needs [_ ns]] (not-any? #(contains? needs %) ns)))
+                  ;; Jobs that only need cyclic Jobs are not in the cycle themselves
+                  (peel (fn [needs [id _]] (not-any? #(contains? % id) (vals needs))))
+                  keys)]
+    (when (seq cycle)
+      (let [ids (filterv (set cycle) (map :id jobs))]
+        (throw (ex-info (str "Jobs " (str/join ", " (map #(str "`" % "`") ids))
+                             " need each other in a cycle")
+                        {:jobs ids}))))))
 
 (defn workflow->ci-model
   "Converts the YAML text of one Workflow into a validated CI Model.
@@ -193,7 +239,9 @@
   ([workflow-yaml] (workflow->ci-model workflow-yaml {}))
   ([workflow-yaml {:keys [workflow-path] :or {workflow-path "workflow"}}]
    (let [workflow (yaml/parse-string workflow-yaml)
-         jobs (mapv #(convert-job workflow-path %) (:jobs workflow))]
+         job-ids (into #{} (map (comp name key)) (:jobs workflow))
+         jobs (mapv #(convert-job workflow-path job-ids %) (:jobs workflow))]
+     (check-no-cycle! (map :job jobs))
      (ci-model/validate!
       {:jobs (mapv :job jobs)
        :gaps (into [] (mapcat :gaps) jobs)}))))

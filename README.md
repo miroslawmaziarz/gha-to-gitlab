@@ -18,6 +18,7 @@ Repositories, issues and pull requests are out of scope; GitLab's built-in GitHu
 |---|---|
 | `run:` Step | a script line |
 | `runs-on` | the Job's `image` and runner `tags` (Runner Mapping) |
+| `needs:` | the Job's `needs:`, plus derived `stages` (`stage-1`, `stage-2`, …) so every Job runs after the Jobs it needs |
 | `actions/checkout` | dropped: GitLab checks out the repository itself |
 | `actions/setup-node`, `setup-python`, `setup-java` | the Job's `image` (`node:20`, `python:3.12`, `eclipse-temurin:21`, …), overriding the Runner Mapping image |
 | setup Actions' `cache:` (npm, yarn, pip, pipenv, poetry, maven, gradle) | a Job `cache` inside the project, plus the Variable that points the tool at it |
@@ -152,9 +153,11 @@ clojure -M:run --config migration.edn path/to/github-clone path/to/output
 ### Current limits
 
 - The clone must contain exactly one Workflow under `.github/workflows/` (#10).
-- Not converted yet: Triggers (#7), Variables and Secrets (#6), Job dependencies and Stages (#5), Matrices (#8), and `if:` conditions on Jobs and Steps (#9, #17). A Step's `if:` is ignored without a Gap.
+- Not converted yet: Triggers (#7), Variables and Secrets (#6), Matrices (#8), and `if:` conditions on Jobs and Steps (#9, #17). A Step's `if:` is ignored without a Gap.
 - `cache: pnpm` and `cache: sbt` on setup Actions, and cache paths outside the project, have no faithful GitLab form, so they become Gaps. `restore-keys` is dropped with a note in the Action's outcome.
 - Generated settings follow current GitLab (for example, up to 10 files in `cache:key:files`). Older self-managed instances may need adjustments.
+
+Jobs with no `needs:` run in the first Stage, and every other Job in the Stage after the latest Job it needs; the Migration Report shows each Job's Stage. A Workflow without `needs:` gets no `stages`, as GitLab's default Stage runs all its Jobs together. A `needs:` naming a Job the Workflow does not define is left out and becomes a Gap.
 
 A GitHub Job whose id is a GitLab global keyword (such as `image`, `variables` or `workflow`) is renamed with a `_job` suffix, and the Migration Report lists the rename.
 

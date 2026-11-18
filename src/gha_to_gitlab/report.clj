@@ -5,6 +5,9 @@
 
 (def file-name "MIGRATION_REPORT.md")
 
+(defn- backticked [ids]
+  (str/join ", " (map #(str "`" % "`") ids)))
+
 (defn- image-origin
   "Where an image an Action set came from, e.g. \"from Step `Node` (Action
   `actions/setup-node@v4`, overriding the Runner Mapping image
@@ -32,8 +35,17 @@
                  (when origin (str " " origin))
                  ", "
                  (if (seq tags)
-                   (str "tags " (str/join ", " (map #(str "`" % "`") tags)))
+                   (str "tags " (backticked tags))
                    "no tags")))))
+
+(defn- stage-part
+  "The Stage a Job runs in and the Jobs it waits for; empty when the
+  Pipeline has a single Stage (`stage` is nil)."
+  [stage {:keys [needs]}]
+  (cond
+    (nil? stage) ""
+    (seq needs) (str "; Stage `" stage "`, after " (backticked needs))
+    :else (str "; Stage `" stage "`")))
 
 (defn- action-line [{:keys [step action outcome gap-count]}]
   (str "  - Step `" step "`: Action `" action "` " outcome
@@ -44,15 +56,16 @@
 
 (defn- job-lines
   "The Job's line, then one nested line per Action it converted."
-  [{:keys [id script actions] :as job}]
+  [stages {:keys [id script actions] :as job}]
   (let [target-name (gitlab/job-name id)
         n (count script)]
-    (cons (format "- `%s`%s: %d script line%s%s"
+    (cons (format "- `%s`%s: %d script line%s%s%s"
                   id
                   (if (= id target-name) "" (str " → `" target-name "` (renamed: `" id "` is a GitLab keyword)"))
                   n
                   (if (= 1 n) "" "s")
-                  (runner-part job))
+                  (runner-part job)
+                  (stage-part (get stages id) job))
           (map action-line actions))))
 
 (defn- gap-line [{:keys [message]}]
@@ -71,7 +84,7 @@
      ""
      (str "Workflow `" workflow-path "` became `" gitlab/ci-file-name "` with these Jobs:")
      ""]
-    (mapcat job-lines (:jobs model))
+    (mapcat (partial job-lines (gitlab/job-stages model)) (:jobs model))
     ["" "## Gaps" ""]
     (if-let [gaps (seq (:gaps model))]
       (concat [(if (= 1 (count gaps))

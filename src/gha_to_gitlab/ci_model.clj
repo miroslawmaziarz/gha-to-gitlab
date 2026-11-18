@@ -66,6 +66,8 @@
   [:map {:closed true}
    [:id [:string {:min 1}]]
    [:runs-on {:optional true} :string]
+   ;; ids of the Jobs this Job runs after, in Source order
+   [:needs {:optional true} [:vector {:min 1} [:string {:min 1}]]]
    [:image {:optional true} [:string {:min 1}]]
    ;; the Runner Mapping's image, kept when an Action's image overrides it
    [:runner-mapping-image {:optional true} [:string {:min 1}]]
