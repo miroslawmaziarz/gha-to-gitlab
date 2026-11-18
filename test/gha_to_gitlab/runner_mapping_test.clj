@@ -24,8 +24,10 @@
       (is (= [nil nil] (map :image (:jobs model))))
       (is (= [nil nil] (map :tags (:jobs model)))))
     (testing "each unmapped label is a Gap naming the Job and the label"
-      (is (= [{:message "Job `job0` runs on `macos-latest`, which has no Runner Mapping; add one in the Migration Config or set the Job's image and tags by hand."}
-              {:message "Job `job1` runs on `self-hosted, linux`, which has no Runner Mapping; add one in the Migration Config or set the Job's image and tags by hand."}]
+      (is (= [{:job "job0"
+               :message "Job `job0`: runs on `macos-latest`, which has no Runner Mapping; add one in the Migration Config or set the Job's image and tags by hand."}
+              {:job "job1"
+               :message "Job `job1`: runs on `self-hosted, linux`, which has no Runner Mapping; add one in the Migration Config or set the Job's image and tags by hand."}]
              (:gaps model))))))
 
 (deftest missing-runs-on-test
@@ -67,5 +69,6 @@
 
 (deftest expression-label-test
   (testing "a runs-on expression is a Gap saying it must be resolved by hand, not mapped"
-    (is (= [{:message "Job `job0` runs on the expression `${{ matrix.os }}`, which is only known when the Workflow runs; resolve it and set the Job's image and tags by hand."}]
+    (is (= [{:job "job0"
+             :message "Job `job0`: runs on the expression `${{ matrix.os }}`, which is only known when the Workflow runs; resolve it and set the Job's image and tags by hand."}]
            (:gaps (runner-mapping/apply-runner-mappings (model-running-on "${{ matrix.os }}") {}))))))
