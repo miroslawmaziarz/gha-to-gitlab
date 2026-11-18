@@ -1,6 +1,7 @@
 (ns gha-to-gitlab.wording
-  "Small helpers that write Source values as short text, for Gap messages
-  and labels such as a runner group's `runs-on`."
+  "Small text helpers shared by the conversion: Source values as short
+  text (for Gap messages and labels such as a runner group's `runs-on`),
+  English ordinals, and shell quoting for script lines."
   (:require [clojure.string :as str]))
 
 (defn yaml-ish
@@ -18,3 +19,8 @@
   (str n (if (#{11 12 13} (mod n 100))
            "th"
            (case (mod n 10) 1 "st" 2 "nd" 3 "rd" "th"))))
+
+(defn shell-quote
+  "`s` as one single-quoted POSIX shell word."
+  [s]
+  (str "'" (str/replace s "'" "'\\''") "'"))

@@ -20,9 +20,9 @@ jobs:
 ")
 
 (deftest workflow->ci-model-test
-  (testing "each Job with run: Steps becomes a CI Model Job whose script is the commands in order"
-    (is (= {:jobs [{:id "build" :runs-on "ubuntu-latest" :script ["npm ci" "npm run build"]}
-                   {:id "lint" :runs-on "ubuntu-latest" :script ["npm run lint"]}]
+  (testing "each Job with run: Steps becomes a CI Model Job, naming its Workflow, whose script is the commands in order"
+    (is (= {:jobs [{:id "build" :workflow "workflow" :runs-on "ubuntu-latest" :script ["npm ci" "npm run build"]}
+                   {:id "lint" :workflow "workflow" :runs-on "ubuntu-latest" :script ["npm run lint"]}]
             :gaps []}
            (github/workflow->ci-model two-job-workflow)))))
 

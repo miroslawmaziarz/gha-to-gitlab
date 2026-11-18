@@ -6,7 +6,7 @@
             [gha-to-gitlab.action-translator :as action-translator]
             [gha-to-gitlab.action-translators]
             [gha-to-gitlab.ci-model :as ci-model]
-            [gha-to-gitlab.report :as report]
+            [gha-to-gitlab.gap :as gap]
             [gha-to-gitlab.wording :as wording]))
 
 (defn- step-label [step index]
@@ -22,37 +22,24 @@
     (map? runs-on) (str/join ", " (map (fn [[k v]] (str (name k) ": " (wording/yaml-ish v))) runs-on))
     :else (str runs-on)))
 
-(defn- shell-quote
-  "`s` as one single-quoted POSIX shell word."
-  [s]
-  (str "'" (str/replace s "'" "'\\''") "'"))
-
 (defn- step-location
-  "Where a Step that uses an Action is in the Source: the Gap keys
-  `:workflow :job :step :action`, plus `:prefix`, the start of a Gap message
-  naming them all."
+  "Where a Step that uses an Action is in the Source, as a Gap location
+  (`gha-to-gitlab.gap/at`): `:workflow :job :step :action`."
   [workflow-path job-id step index]
-  (let [label (step-label step index)
-        action (:uses step)]
-    {:workflow workflow-path
-     :job job-id
-     :step label
-     :action action
-     :prefix (str "Workflow `" workflow-path "`, Job `" job-id "`, Step `" label
-                  "`: Action `" action "` ")}))
+  {:workflow workflow-path
+   :job job-id
+   :step (step-label step index)
+   :action (:uses step)})
 
 (defn- located-gap
-  "A Gap at `location` whose message continues the location's prefix."
-  [{:keys [prefix] :as location} {:keys [message] :as gap}]
-  (merge gap
-         (dissoc location :prefix)
-         {:message (str prefix message)}))
+  "Gap `gap` (`{:message ..}`, optionally the `:input` it is about), raised
+  for the Action at `location`, placed there."
+  [location {:keys [input message]}]
+  (gap/at (assoc location :input input) message))
 
 (defn- unknown-action [{:keys [action] :as location}]
-  {:script [(str "echo " (shell-quote (str "Gap: Action " action " was not converted; see "
-                                           report/file-name)))]
-   :gaps [(located-gap location {:message (str "has no Action Translator;"
-                                               " replace its placeholder script line by hand.")})]})
+  {:script [(gap/placeholder-line action)]
+   :gaps [(gap/at location "has no Action Translator; replace its placeholder script line by hand.")]})
 
 (defn- translated-action [{:keys [step action] :as location} translation]
   (let [{:keys [script gaps outcome job-settings]} translation]
@@ -82,7 +69,7 @@
 (def ^:private nothing-left-to-run
   "The script line of a Job whose Steps all converted to no script lines
   (e.g. only `actions/checkout`); GitLab needs at least one."
-  (str "echo " (shell-quote "Nothing left to run after conversion")))
+  (str "echo " (wording/shell-quote "Nothing left to run after conversion")))
 
 (defn- job-script
   "The Job's script lines from its converted Steps. When the Job has Steps
@@ -118,11 +105,9 @@
   (into [] (comp (map str) (distinct)) (if (sequential? needs) needs [needs])))
 
 (defn- missing-job-gap [workflow-path job-id needed]
-  {:workflow workflow-path
-   :job job-id
-   :message (str "Workflow `" workflow-path "`, Job `" job-id "`: needs Job `" needed
-                 "`, which the Workflow does not define; the Job no longer waits for it,"
-                 " so add the dependency by hand.")})
+  (gap/at {:workflow workflow-path :job job-id}
+          (str "needs Job `" needed "`, which the Workflow does not define; the Job no longer waits for it,"
+               " so add the dependency by hand.")))
 
 (defn- convert-job
   "Converts one Job into `{:job .. :gaps [..]}`. `job-ids` are the ids of
@@ -135,7 +120,7 @@
         {:keys [steps settings]} (->> (:steps job)
                                       (map-indexed #(convert-step workflow-path id %1 %2))
                                       settle-job-settings)]
-    {:job (cond-> {:id id}
+    {:job (cond-> {:id id :workflow workflow-path}
             (some? (:runs-on job)) (assoc :runs-on (runner-label (:runs-on job)))
             (seq needs) (assoc :needs needs)
             true (assoc :script (job-script steps))

@@ -60,6 +60,8 @@
   tags), its settings and script lines, and the Actions it converted."
   [:map {:closed true}
    [:id [:string {:min 1}]]
+   ;; the Workflow the Job comes from, its path in the Source
+   [:workflow {:optional true} [:string {:min 1}]]
    [:runs-on {:optional true} :string]
    ;; ids of the Jobs this Job runs after, in Source order
    [:needs {:optional true} [:vector {:min 1} [:string {:min 1}]]]
@@ -79,9 +81,10 @@
    [:actions {:optional true} [:vector ConvertedAction]]])
 
 (def Gap
-  "One Gap. `:message` is what the Migration Report shows; the optional keys
-  say where in the Source the Gap is (`:input` names the Action input an
-  Action Translator could not convert)."
+  "One Gap, as `gha-to-gitlab.gap/at` makes it (ADR-0006). `:message` is
+  what the Migration Report shows, naming the Gap's location first; the
+  optional keys are that location in the Source (`:input` names the Action
+  input an Action Translator could not convert)."
   [:map
    [:message :string]
    [:workflow {:optional true} :string]
