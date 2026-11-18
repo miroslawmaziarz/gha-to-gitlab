@@ -1,13 +1,12 @@
 (ns gha-to-gitlab.action-translators.upload-artifact-test
   (:require [clojure.test :refer [deftest is testing]]
-            [gha-to-gitlab.github :as github]))
+            [gha-to-gitlab.test-support :refer [converted-model]]))
 
 (defn- convert [steps-yaml]
-  (github/workflow->ci-model
-   (str "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n" steps-yaml)
-   {:workflow-path ".github/workflows/ci.yml"}))
+  (converted-model
+   (str "on: push\njobs:\n  build:\n    steps:\n      - run: make\n" steps-yaml)))
 
-(defn- artifacts [model] (-> model :jobs first :action-job-settings :artifacts))
+(defn- artifacts [model] (-> model :jobs first :artifacts))
 
 (deftest common-inputs-test
   (let [model (convert (str "      - uses: actions/upload-artifact@v4\n        with:\n          name: dist\n"

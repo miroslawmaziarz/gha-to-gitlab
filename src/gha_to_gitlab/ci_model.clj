@@ -2,6 +2,7 @@
   "The platform-independent CI Model that every conversion passes through
   (ADR-0001). The Source reader produces it and the Target writer consumes it."
   (:require [clojure.string :as str]
+            [gha-to-gitlab.action-job-settings :as action-job-settings]
             [malli.core :as m]
             [malli.error :as me]))
 
@@ -51,18 +52,6 @@
    ;; how long GitLab keeps them, e.g. "5 days"; missing: the instance default
    [:expire-in {:optional true} [:string {:min 1}]]])
 
-(def list-settings
-  "Job settings that hold a list each Action adds its entries to, instead of
-  one value; per setting, the most entries a Job can hold (GitLab allows 4
-  caches per Job)."
-  {:cache 4})
-
-(def map-settings
-  "Job settings that hold a map each Action adds its entries to, instead of
-  one value (such as `:variables`); an entry two Actions set differently
-  keeps the earlier Action's value."
-  #{:variables})
-
 (def Job
   "One Job: its id, the Jobs it needs, where it runs (runner label, image,
   tags), its settings and script lines, and the Actions it converted."
@@ -82,7 +71,7 @@
    ;; Variables the Job's scripts and tools read, name → value
    [:variables {:optional true} [:map-of [:string {:min 1}] :string]]
    [:script [:vector {:min 1} :string]]
-   [:cache {:optional true} [:vector {:min 1 :max (:cache list-settings)} Cache]]
+   [:cache {:optional true} [:vector {:min 1 :max (:cache action-job-settings/list-settings)} Cache]]
    [:artifacts {:optional true} Artifacts]
    [:actions {:optional true} [:vector ConvertedAction]]])
 

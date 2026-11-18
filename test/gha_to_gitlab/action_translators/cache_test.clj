@@ -1,20 +1,19 @@
 (ns gha-to-gitlab.action-translators.cache-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [gha-to-gitlab.github :as github]))
+            [gha-to-gitlab.test-support :refer [action-settings converted-model]]))
 
 (defn- convert [step-yaml]
-  (github/workflow->ci-model
-   (str "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n"
+  (converted-model
+   (str "on: push\njobs:\n  build:\n    steps:\n"
         step-yaml
-        "      - run: npm test\n")
-   {:workflow-path ".github/workflows/ci.yml"}))
+        "      - run: npm test\n")))
 
 (deftest literal-key-test
   (testing "actions/cache with a path and a literal key becomes a Job cache, with no Gap"
     (let [model (convert "      - uses: actions/cache@v4\n        with:\n          path: node_modules\n          key: deps-v1\n")]
-      (is (= {:action-job-settings {:cache [{:key "deps-v1" :paths ["node_modules"]}]} :script ["npm test"]}
-             (-> model :jobs first (select-keys [:action-job-settings :script]))))
+      (is (= [{:cache [{:key "deps-v1" :paths ["node_modules"]}]} ["npm test"]]
+             (-> model :jobs first ((juxt action-settings :script)))))
       (is (= [] (:gaps model)))
       (is (= "converted to a Job cache" (-> model :jobs first :actions first :outcome))))))
 
@@ -22,13 +21,13 @@
   (testing "a multi-line path becomes one cache path per line"
     (is (= [{:key "k" :paths [".npm" "vendor/**/*.gem"]}]
            (-> (convert "      - uses: actions/cache@v4\n        with:\n          path: |\n            .npm\n\n            vendor/**/*.gem\n          key: k\n")
-               :jobs first :action-job-settings :cache))))
+               :jobs first action-settings :cache))))
   (testing "a path outside the project directory is a Gap naming the input; the other paths are still cached"
     (let [model (convert (str "      - name: Cache\n        uses: actions/cache@v4\n        with:\n"
                               "          path: |\n            ~/.cache/Cypress\n            node_modules\n            /opt/x\n"
                               "            ../up\n            ${{ env.DIR }}\n            !node_modules/.bin\n"
                               "          key: k\n"))]
-      (is (= [{:key "k" :paths ["node_modules"]}] (-> model :jobs first :action-job-settings :cache)))
+      (is (= [{:key "k" :paths ["node_modules"]}] (-> model :jobs first action-settings :cache)))
       (is (= ["path" "path" "path" "path" "path"] (map :input (:gaps model))))
       (is (= (str "Workflow `.github/workflows/ci.yml`, Job `build`, Step `Cache`: Action `actions/cache@v4` "
                   "input `path: ~/.cache/Cypress` has no GitLab equivalent: GitLab caches only paths inside the project "
@@ -40,7 +39,7 @@
                    (-> model :gaps (nth 4) :message)))))
   (testing "with no path left to cache the Step is dropped with no cache"
     (let [model (convert "      - uses: actions/cache@v4\n        with:\n          path: ~/.cache/Cypress\n          key: k\n")]
-      (is (nil? (-> model :jobs first :action-job-settings :cache)))
+      (is (nil? (-> model :jobs first action-settings :cache)))
       (is (= "dropped; add the Job cache by hand (see Gaps)" (-> model :jobs first :actions first :outcome)))))
   (testing "a missing path is a Gap"
     (is (= ["path"] (->> (convert "      - uses: actions/cache@v4\n        with:\n          key: k\n") :gaps (map :input))))))
@@ -52,20 +51,20 @@
   (testing "hashFiles becomes a key on those files, and the rest of the key its prefix"
     (let [model (cache-for "${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}")]
       (is (= [{:key {:files ["**/package-lock.json"] :prefix "node"} :paths [".npm"]}]
-             (-> model :jobs first :action-job-settings :cache)))
+             (-> model :jobs first action-settings :cache)))
       (is (= [] (:gaps model)))
       (is (= "converted to a Job cache (its key leaves out `runner.os`, which GitLab has no Variable for)"
              (-> model :jobs first :actions first :outcome)))))
   (testing "a key on up to 10 files (current GitLab's limit) has them all"
     (is (= (mapv #(str "f" % ".lock") (range 10))
            (-> (cache-for (str "${{ hashFiles(" (str/join ", " (map #(str "'f" % ".lock'") (range 10))) ") }}"))
-               :jobs first :action-job-settings :cache first :key :files))))
+               :jobs first action-settings :cache first :key :files))))
   (testing "a key that is only hashFiles of two files has no prefix"
     (is (= {:files ["Gemfile.lock" "yarn.lock"]}
-           (-> (cache-for "${{ hashFiles('Gemfile.lock', \"yarn.lock\") }}") :jobs first :action-job-settings :cache first :key))))
+           (-> (cache-for "${{ hashFiles('Gemfile.lock', \"yarn.lock\") }}") :jobs first action-settings :cache first :key))))
   (testing "commit and branch expressions become GitLab Variables"
     (is (= "build-$CI_COMMIT_REF_SLUG-$CI_COMMIT_SHA"
-           (-> (cache-for "build-${{ github.ref_name }}-${{github.sha}}") :jobs first :action-job-settings :cache first :key))))
+           (-> (cache-for "build-${{ github.ref_name }}-${{github.sha}}") :jobs first action-settings :cache first :key))))
   (testing "a key GitLab can't express is a Gap naming the input, and no cache is added"
     (doseq [[key-yaml hint] [["deps-${{ matrix.node }}-${{ hashFiles('a.lock') }}"
                               "`matrix.node` is only known when the Workflow runs; write the Job cache's key by hand."]
@@ -76,7 +75,7 @@
                              ["deps/${{ hashFiles('a.lock') }}"
                               "a GitLab cache key can't contain `/`; write the Job cache's key by hand."]]]
       (let [model (cache-for key-yaml)]
-        (is (nil? (-> model :jobs first :action-job-settings :cache)) key-yaml)
+        (is (nil? (-> model :jobs first action-settings :cache)) key-yaml)
         (is (= [(str "input `key: " key-yaml "` has no GitLab equivalent: " hint)]
                (map #(subs (:message %) (count "Workflow `.github/workflows/ci.yml`, Job `build`, Step `step 1`: Action `actions/cache@v4` "))
                     (:gaps model))))
@@ -91,7 +90,7 @@
                             "          fail-on-cache-miss: false\n          lookup-only: false\n"
                             "          save-always: true\n          new-input: x\n"))]
     (testing "save-always becomes a cache saved whatever the Job's result"
-      (is (= [{:key "k" :paths [".npm"] :when "always"}] (-> model :jobs first :action-job-settings :cache))))
+      (is (= [{:key "k" :paths [".npm"] :when "always"}] (-> model :jobs first action-settings :cache))))
     (testing "unknown inputs are Gaps naming them; harmless inputs are not"
       (is (= ["new-input"] (map :input (:gaps model)))))
     (testing "restore-keys only costs speed, so the outcome says it was dropped instead of a Gap"
@@ -109,7 +108,7 @@
     (doseq [[action policy outcome] [["restore" "pull" "converted to a Job cache that is only restored (`policy: pull`)"]
                                      ["save" "push" "converted to a Job cache that is only saved (`policy: push`)"]]]
       (let [model (convert (str "      - uses: actions/cache/" action "@v4\n        with:\n          path: .npm\n          key: k\n"))]
-        (is (= [{:key "k" :paths [".npm"] :policy policy}] (-> model :jobs first :action-job-settings :cache)))
+        (is (= [{:key "k" :paths [".npm"] :policy policy}] (-> model :jobs first action-settings :cache)))
         (is (= [] (:gaps model)))
         (is (= outcome (-> model :jobs first :actions first :outcome)))))))
 
@@ -119,11 +118,11 @@
 (deftest several-caches-test
   (testing "each cache Step in a Job adds one cache to it, in Step order"
     (let [model (convert (str/join (map cache-step [1 2])))]
-      (is (= [{:key "k1" :paths ["c1"]} {:key "k2" :paths ["c2"]}] (-> model :jobs first :action-job-settings :cache)))
+      (is (= [{:key "k1" :paths ["c1"]} {:key "k2" :paths ["c2"]}] (-> model :jobs first action-settings :cache)))
       (is (= [] (:gaps model)))))
   (testing "a Job keeps at most 4 caches, as GitLab allows; a 5th is a Gap at its Step"
     (let [model (convert (str/join (map cache-step [1 2 3 4 5])))]
-      (is (= ["k1" "k2" "k3" "k4"] (map :key (-> model :jobs first :action-job-settings :cache))))
+      (is (= ["k1" "k2" "k3" "k4"] (map :key (-> model :jobs first action-settings :cache))))
       (is (= [(str "Workflow `.github/workflows/ci.yml`, Job `build`, Step `Cache 5`: Action `actions/cache@v4` "
                    "adds the 5th entry to the Job's `cache`, but GitLab allows at most 4; "
                    "the Job leaves it out, so merge it into another entry by hand.")]
@@ -137,7 +136,7 @@
                               "          restore-keys: |\n            ${{ runner.os }}-node-\n"))]
       (is (= {:cache [{:key {:files ["**/package-lock.json"] :prefix "node"} :paths [".npm"]}]
               :variables {"npm_config_cache" "$CI_PROJECT_DIR/.npm"}}
-             (-> model :jobs first :action-job-settings)))
+             (-> model :jobs first action-settings)))
       (is (= [] (:gaps model)))
       (is (= (str "converted to a Job cache (`~/.npm` cached as `.npm` in the project, with the Variable "
                   "`npm_config_cache` pointing npm there; its key leaves out `runner.os`, which GitLab has no "
@@ -156,5 +155,5 @@
       (let [model (convert (str "      - uses: actions/cache@v4\n        with:\n          path: |\n            " path
                                 "\n          key: k\n"))]
         (is (= {:cache [{:key "k" :paths paths}] :variables variables}
-               (-> model :jobs first :action-job-settings)) path)
+               (-> model :jobs first action-settings)) path)
         (is (= [] (:gaps model)) path)))))

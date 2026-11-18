@@ -1,13 +1,12 @@
 (ns gha-to-gitlab.action-translators.checkout-test
   (:require [clojure.test :refer [deftest is testing]]
-            [gha-to-gitlab.github :as github]))
+            [gha-to-gitlab.test-support :refer [converted-model]]))
 
 (defn- convert [checkout-step-yaml]
-  (github/workflow->ci-model
-   (str "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n"
+  (converted-model
+   (str "on: push\njobs:\n  build:\n    steps:\n"
         checkout-step-yaml
-        "      - run: make\n")
-   {:workflow-path ".github/workflows/ci.yml"}))
+        "      - run: make\n")))
 
 (deftest checkout-dropped-test
   (testing "actions/checkout is dropped, since GitLab checks out automatically, with no Gap"
