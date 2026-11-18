@@ -57,7 +57,7 @@
     (let [err (java.io.StringWriter.)
           exit (binding [*err* err] (cli/run ["does/not/exist" (temp-dir)]))]
       (is (= 1 exit))
-      (is (str/includes? (str err) "Expected exactly one Workflow")))))
+      (is (str/includes? (str err) "No Workflow in does/not/exist/.github/workflows")))))
 
 (deftest gaps-still-succeed-test
   (testing "a Migration Run that has Gaps still exits 0"

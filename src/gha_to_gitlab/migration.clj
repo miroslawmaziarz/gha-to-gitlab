@@ -18,9 +18,10 @@
   "The one `[path text]` entry of `workflows`; throws ex-info otherwise."
   [workflows]
   (when (not= 1 (count workflows))
-    (throw (ex-info (str "Expected exactly one Workflow, found " (count workflows)
-                         (when (seq workflows) (str ": " (str/join ", " (sort (keys workflows))))))
-                    {:workflows (vec (sort (keys workflows)))})))
+    (let [paths (vec (sort (keys workflows)))]
+      (throw (ex-info (str "Expected exactly one Workflow, found " (count paths)
+                           (when (seq paths) (str ": " (str/join ", " paths))))
+                      {:workflows paths}))))
   (first workflows))
 
 (defn convert
@@ -43,12 +44,16 @@
 
 (defn- read-workflows
   "Workflow path → YAML text for every `.yml`/`.yaml` file in the clone's
-  `.github/workflows`."
+  `.github/workflows`; throws ex-info naming that folder when it has none."
   [source-dir]
-  (into {}
-        (for [file (.listFiles (io/file source-dir workflows-dir))
-              :when (re-find #"\.ya?ml$" (.getName file))]
-          [(str workflows-dir "/" (.getName file)) (slurp file)])))
+  (let [dir (io/file source-dir workflows-dir)
+        workflows (into {}
+                        (for [file (.listFiles dir)
+                              :when (re-find #"\.ya?ml$" (.getName file))]
+                          [(str workflows-dir "/" (.getName file)) (slurp file)]))]
+    (when (empty? workflows)
+      (throw (ex-info (str "No Workflow in " dir) {:source-dir source-dir})))
+    workflows))
 
 (defn run!
   "Runs one Migration Run against the local clone at `source-dir`, writing

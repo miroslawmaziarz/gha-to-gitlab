@@ -12,11 +12,25 @@
   ([workflow-yaml config]
    (migration/convert {:workflows {".github/workflows/ci.yml" workflow-yaml} :config config})))
 
+(defn- run-and-read!
+  "Runs `migration/run!` against a clone, either a folder or a map of
+  Workflow path → YAML text written to a fresh one, and returns the texts of
+  the files it wrote."
+  [clone]
+  (let [src (if (string? clone)
+              clone
+              (let [dir (temp-dir)]
+                (doseq [[path text] clone]
+                  (io/make-parents (io/file dir path))
+                  (spit (io/file dir path) text))
+                dir))
+        out (temp-dir)]
+    (migration/run! {:source-dir src :output-dir out})
+    {:gitlab-ci-yaml (slurp (io/file out ".gitlab-ci.yml"))
+     :report (slurp (io/file out "MIGRATION_REPORT.md"))}))
+
 (deftest migration-run-against-fixture-test
-  (let [out (temp-dir)
-        _ (migration/run! {:source-dir "test/fixtures/plain-workflow" :output-dir out})
-        gitlab-ci-yaml (slurp (io/file out ".gitlab-ci.yml"))
-        report (slurp (io/file out "MIGRATION_REPORT.md"))]
+  (let [{:keys [gitlab-ci-yaml report]} (run-and-read! "test/fixtures/plain-workflow")]
     (testing "writes a .gitlab-ci.yml with one Job per GitHub Job, its mapped image, and the commands as script lines"
       (is (= {:build {:image "ubuntu:24.04" :script ["npm ci" "npm run build"]}
               :test {:image "ubuntu:24.04" :script ["npm ci" "npm test\nnpm run coverage\n"]}
@@ -37,16 +51,11 @@
                        "`image` → `image_job`"))))
 
 (deftest unknown-action-migration-run-test
-  (let [src (temp-dir)
-        out (temp-dir)
-        wf (io/file src ".github/workflows/deploy.yml")
-        _ (io/make-parents wf)
-        _ (spit wf (str "on: push\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n    steps:\n"
-                        "      - uses: acme/login@v1\n      - run: make deploy\n"
-                        "      - name: Notify\n        uses: acme/notify@v3\n"))
-        _ (migration/run! {:source-dir src :output-dir out})
-        gitlab-ci-yaml (slurp (io/file out ".gitlab-ci.yml"))
-        report (slurp (io/file out "MIGRATION_REPORT.md"))]
+  (let [{:keys [gitlab-ci-yaml report]}
+        (run-and-read! {".github/workflows/deploy.yml"
+                        (str "on: push\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n    steps:\n"
+                             "      - uses: acme/login@v1\n      - run: make deploy\n"
+                             "      - name: Notify\n        uses: acme/notify@v3\n")})]
     (testing "the Migration Run still writes the Pipeline, with placeholder script lines for the Gaps"
       (is (= {:deploy {:image "ubuntu:24.04"
                        :script ["echo 'Gap: Action acme/login@v1 was not converted; see MIGRATION_REPORT.md'"
@@ -109,13 +118,21 @@
                               "  - Step `Node`: Action `actions/setup-node@v4` converted to the Job image `node:20`\n"
                               "- `lint`: 1 script line; runs on `ubuntu-latest` → image `ubuntu:24.04`, no tags"))))))
 
-(deftest setup-action-image-without-runner-mapping-report-test
-  (let [{:keys [report]}
+(deftest setup-action-image-without-runner-mapping-test
+  (let [{:keys [model report]}
         (convert-workflow
          (str "on: push\njobs:\n  mac:\n    runs-on: macos-latest\n    steps:\n"
               "      - uses: actions/setup-node@v4\n        with:\n          node-version: 22\n"
-              "      - run: npm test\n"))]
-    (testing "a Job with no Runner Mapping still shows the image its Action set"
+              "      - run: npm test\n"
+              "  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n"))
+        [mac lint] (:jobs model)]
+    (testing "a Job with no Runner Mapping gets its Action's image, and no Runner Mapping image is recorded"
+      (is (= {:id "mac" :runs-on "macos-latest" :image "node:22" :script ["npm test"]}
+             (dissoc mac :actions))))
+    (testing "a Job without Action Job settings keeps its Runner Mapping image"
+      (is (= {:id "lint" :runs-on "ubuntu-latest" :image "ubuntu:24.04" :tags [] :script ["make lint"]}
+             lint)))
+    (testing "the Migration Report still shows the image the Action set"
       (is (str/includes? report
                          (str "- `mac`: 1 script line; runs on `macos-latest` → no Runner Mapping (see Gaps); "
                               "image `node:22` from Step `step 1` (Action `actions/setup-node@v4`)\n"))))))
@@ -169,26 +186,24 @@
       (is (str/includes? report "1 Gap needs a person to finish it:"))
       (is (str/includes? report "Job `deploy`: needs Job `bild`, which the Workflow does not define")))))
 
-(def ^:private setup-node-workflow
-  (str "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n"
-       "      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n"
-       "      - run: npm test\n"))
-
-(deftest convert-test
+(deftest in-memory-migration-run-test
   (let [{:keys [model gitlab-ci-yaml report]}
-        (migration/convert {:workflows {".github/workflows/ci.yml" setup-node-workflow}
-                            :config {:runner-mappings {"ubuntu-latest" {:image "ubuntu:22.04" :tags ["docker"]}}}})]
+        (convert-workflow
+         (str "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n"
+              "      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n"
+              "      - run: npm test\n")
+         {:runner-mappings {"ubuntu-latest" {:image "ubuntu:22.04" :tags ["docker"]}}})]
     (testing "a Migration Run from Workflow text and a Migration Config, with no files, gives the finished CI Model"
       (is (= [{:id "build" :runs-on "ubuntu-latest" :image "node:20" :runner-mapping-image "ubuntu:22.04"
                :tags ["docker"] :script ["npm test"]}]
              (mapv #(dissoc % :actions) (:jobs model)))))
-    (testing "the .gitlab-ci.yml text, where the Action's image replaces the Runner Mapping image and the tags stay"
+    (testing "and the .gitlab-ci.yml text, where the Action's image replaces the Runner Mapping image and the tags stay"
       (is (= {:build {:image "node:20" :tags ["docker"] :script ["npm test"]}}
              (yaml/parse-string gitlab-ci-yaml))))
-    (testing "and the Migration Report text naming the Workflow"
+    (testing "and the Migration Report text, naming the Workflow it converted"
       (is (str/includes? report "Workflow `.github/workflows/ci.yml` became `.gitlab-ci.yml`")))))
 
-(deftest convert-config-test
+(deftest migration-config-test
   (testing "a Runner Mapping in the Migration Config without :tags maps to no tags"
     (is (= {:build {:image "node:22" :script ["make"]}}
            (-> (convert-workflow "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n"
@@ -199,7 +214,7 @@
           (convert-workflow "on: push\njobs:\n  b:\n    runs-on: x\n    steps:\n      - run: make\n"
                             {:runner-mappings {"x" {:tags ["a"]}}})))))
 
-(deftest convert-workflow-count-test
+(deftest workflow-count-test
   (testing "a Migration Run needs exactly one Workflow, and names the ones it found"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Expected exactly one Workflow, found 0$"
           (migration/convert {:workflows {}})))
@@ -207,17 +222,9 @@
           #"Expected exactly one Workflow, found 2: .github/workflows/a.yml, .github/workflows/b.yml"
           (migration/convert {:workflows {".github/workflows/b.yml" "" ".github/workflows/a.yml" ""}})))))
 
-(deftest action-image-without-runner-mapping-test
-  (let [jobs (-> (convert-workflow
-                  (str "on: push\njobs:\n"
-                       "  mac:\n    runs-on: macos-latest\n    steps:\n"
-                       "      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n"
-                       "      - run: npm test\n"
-                       "  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n"))
-                 :model :jobs)]
-    (testing "a Job with no Runner Mapping gets its Action's image, and no Runner Mapping image is recorded"
-      (is (= {:id "mac" :runs-on "macos-latest" :image "node:20" :script ["npm test"]}
-             (dissoc (first jobs) :actions))))
-    (testing "a Job without Action Job settings keeps its Runner Mapping image"
-      (is (= {:id "lint" :runs-on "ubuntu-latest" :image "ubuntu:24.04" :tags [] :script ["make lint"]}
-             (second jobs))))))
+(deftest clone-without-workflows-test
+  (testing "a Migration Run against a clone with no Workflow names the folder it looked in"
+    (let [src (temp-dir)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+            (re-pattern (str "No Workflow in \\Q" src "/.github/workflows\\E"))
+            (migration/run! {:source-dir src :output-dir (temp-dir)}))))))

@@ -25,22 +25,24 @@
           #(update-vals (or % {}) (fn [mapping] (merge {:tags []} mapping)))))
 
 (defn validate-config
-  "The Migration Config `config` with defaults filled in (a Runner Mapping
-  without `:tags` has none); nil is the empty Migration Config. Throws
-  ex-info naming the problem when invalid; `source` names where the
-  Migration Config came from in that message."
+  "Checks the Migration Config value `config` and returns it with defaults
+  filled in (a Runner Mapping without `:tags` has none); nil is the empty
+  Migration Config. Throws ex-info naming the problem when invalid;
+  `path`, when given, names the file it came from in that message."
   ([config] (validate-config config nil))
-  ([config source]
+  ([config path]
    (cond
      (nil? config) empty-config
      (m/validate Config config) (with-defaults config)
-     :else (throw (ex-info (str "Invalid Migration Config" (when source (str " " source)) ": "
+     :else (throw (ex-info (str "Invalid Migration Config" (when path (str " " path)) ": "
                                 (pr-str (me/humanize (m/explain Config config))))
-                           {:path source})))))
+                           (cond-> {:errors (me/humanize (m/explain Config config))}
+                             path (assoc :path path)))))))
 
 (defn load-config
   "Reads and validates the Migration Config at `path` (see
   `validate-config`); with no `path`, returns the empty Migration Config."
   [path]
-  (when path
-    (validate-config (edn/read-string (slurp path)) path)))
+  (if path
+    (validate-config (edn/read-string (slurp path)) path)
+    empty-config))
