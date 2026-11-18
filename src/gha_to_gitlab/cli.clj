@@ -34,7 +34,9 @@
     (do (print-err usage)
         2)))
 
-(defn -main [& args]
+(defn -main
+  "Runs the CLI and exits with its exit code (see `run`)."
+  [& args]
   (let [exit (run args)]
     (shutdown-agents)
     (System/exit exit)))

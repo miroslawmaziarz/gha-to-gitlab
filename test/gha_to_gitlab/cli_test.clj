@@ -3,8 +3,8 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [gha-to-gitlab.test-support :refer [temp-dir]]
-            [gha-to-gitlab.cli :as cli]))
+            [gha-to-gitlab.cli :as cli]
+            [gha-to-gitlab.test-support :refer [temp-dir]]))
 
 (deftest run-with-clone-and-output-dir-test
   (testing "a clone path and an output directory run a Migration Run and exit 0"

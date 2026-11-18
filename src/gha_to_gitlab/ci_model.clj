@@ -64,6 +64,8 @@
   #{:variables})
 
 (def Job
+  "One Job: its id, the Jobs it needs, where it runs (runner label, image,
+  tags), its settings and script lines, and the Actions it converted."
   [:map {:closed true}
    [:id [:string {:min 1}]]
    [:runs-on {:optional true} :string]
@@ -97,6 +99,8 @@
    [:input {:optional true} :string]])
 
 (def CIModel
+  "The CI Model of one Migration Run: its Jobs, in Source order, and every
+  Gap raised so far."
   [:map {:closed true}
    [:jobs [:vector {:min 1} Job]]
    [:gaps [:vector Gap]]])

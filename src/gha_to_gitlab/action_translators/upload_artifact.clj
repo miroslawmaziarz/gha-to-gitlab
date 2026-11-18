@@ -20,7 +20,7 @@
     (paths/outside-project? path)
     "GitLab keeps only paths inside the project directory; copy the files into it in a script line and add that path by hand"))
 
-(defn- expire-in
+(defn- retention->expire-in
   "`expire_in` for a `retention-days` value: `{:expire-in \"N days\"}`, `{}`
   for 0 (the repository's default, as GitLab's default is the instance's),
   or `{:hint ..}`."
@@ -75,7 +75,7 @@
         artifact-name (get with "name")
         name-hint (when (and artifact-name (paths/expression? (str artifact-name)))
                     "the name is only known when the Workflow runs; write the Job artifacts' name (it may use GitLab Variables) by hand")
-        {:keys [expire-in] days-hint :hint} (some-> (get with "retention-days") expire-in)
+        {:keys [expire-in] days-hint :hint} (some-> (get with "retention-days") retention->expire-in)
         gaps (concat
               (when name-hint [(inputs/input-gap "name" artifact-name name-hint)])
               (for [line lines :let [hint (path-problem (line-path line))] :when hint]

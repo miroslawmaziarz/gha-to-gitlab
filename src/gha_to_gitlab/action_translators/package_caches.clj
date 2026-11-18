@@ -2,7 +2,8 @@
   "The known package managers' caches, shared by the setup Actions' `cache`
   input and `actions/cache`. GitLab caches only paths inside the project
   directory, so each cache lives there, and Variables point the tool at it
-  instead of its home-directory default.")
+  instead of its home-directory default."
+  (:require [clojure.string :as str]))
 
 (def package-managers
   "Per package manager: `:files`, the lock files a setup Action keys its
@@ -49,7 +50,7 @@
   ignored): `{:manager .. :path <inside the project> :variables {..}}`;
   nil for any other path."
   [path]
-  (let [path (if (and (< 2 (count path)) (.endsWith ^String path "/")) (subs path 0 (dec (count path))) path)]
+  (let [path (if (and (< 2 (count path)) (str/ends-with? path "/")) (subs path 0 (dec (count path))) path)]
     (some (fn [[manager {:keys [home variables]}]]
             (when-let [in-project (get home path)]
               {:manager manager :path in-project :variables variables}))

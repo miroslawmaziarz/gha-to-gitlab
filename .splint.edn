@@ -1,0 +1,11 @@
+;; Splint settings (clojure -M:splint). Every other rule keeps its default.
+{;; the Clojure 1.12 `Class/.method` syntax is not used in this code base yet
+ lint/prefer-method-values {:enabled false}
+ ;; Malli schemas are named in PascalCase (Job, CIModel, RunnerMapping)
+ naming/lisp-case {:enabled false}
+ ;; flags `->` used as one clause of `cond->`, where it is the clearest form
+ lint/thread-macro-one-arg {:enabled false}
+ ;; flags names such as `apply-to-job` that are not conversions
+ naming/conversion-functions {:enabled false}
+ ;; `(is (= 0 exit))` reports the actual value when a test fails; `zero?` does not
+ style/eq-zero {:enabled false}}

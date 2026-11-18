@@ -5,7 +5,7 @@
   and adding one require line here. Nothing else in the conversion changes."
   (:require [gha-to-gitlab.action-translators.cache]
             [gha-to-gitlab.action-translators.checkout]
+            [gha-to-gitlab.action-translators.setup-java]
             [gha-to-gitlab.action-translators.setup-node]
             [gha-to-gitlab.action-translators.setup-python]
-            [gha-to-gitlab.action-translators.setup-java]
             [gha-to-gitlab.action-translators.upload-artifact]))

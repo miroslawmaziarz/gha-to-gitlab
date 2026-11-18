@@ -3,8 +3,8 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [gha-to-gitlab.test-support :refer [temp-dir]]
-            [gha-to-gitlab.migration :as migration]))
+            [gha-to-gitlab.migration :as migration]
+            [gha-to-gitlab.test-support :refer [temp-dir]]))
 
 (deftest migration-run-against-fixture-test
   (let [out (temp-dir)]
