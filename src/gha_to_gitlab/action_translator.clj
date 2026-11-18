@@ -30,16 +30,12 @@
     :job-settings {k v}   Job settings for the Step's Job, e.g.
                           `{:image \"node:20\"}` from a setup Action; keys
                           are CI Model Job keys (`gha-to-gitlab.ci-model/Job`).
-                          The Source reader settles them per Job into
-                          `:action-job-settings`: the earliest Action to set
-                          a setting wins, and a later Action setting it to a
-                          different value gets a Gap. List settings such as
-                          `:cache` collect every Action's entries instead
-                          (`ci-model/list-settings`), and map settings such
-                          as `:variables` combine them, a clashing entry
-                          being a Gap (`ci-model/map-settings`). They are applied after
-                          the Runner Mapping, so they win over it
-                          (`gha-to-gitlab.action-job-settings`, ADR-0002).
+                          `gha-to-gitlab.action-job-settings` settles them
+                          per Job (the earliest Action wins; list settings
+                          such as `:cache` and map settings such as
+                          `:variables` collect every Action's entries; a
+                          conflict is a Gap) and applies them after the
+                          Runner Mapping, so they win over it (ADR-0002).
 
   An Action with no translator falls through to the default method, which
   returns nil, and the Migration Run records it as a Gap.

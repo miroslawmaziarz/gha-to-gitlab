@@ -2,14 +2,13 @@
   "The `cache` and `cache-dependency-path` inputs of the setup Actions."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [gha-to-gitlab.github :as github]))
+            [gha-to-gitlab.test-support :refer [action-settings converted-model]]))
 
 (defn- convert [steps-yaml]
-  (github/workflow->ci-model
-   (str "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n" steps-yaml "      - run: make\n")
-   {:workflow-path ".github/workflows/ci.yml"}))
+  (converted-model
+   (str "on: push\njobs:\n  build:\n    steps:\n" steps-yaml "      - run: make\n")))
 
-(defn- settings [model] (-> model :jobs first :action-job-settings))
+(defn- settings [model] (-> model :jobs first action-settings))
 
 (deftest package-manager-caches-test
   (testing "each supported package manager becomes a Job cache inside the project, keyed on its lock file, plus the Variables that point the tool there"

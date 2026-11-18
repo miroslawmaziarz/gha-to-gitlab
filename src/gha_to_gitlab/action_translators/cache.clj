@@ -9,7 +9,7 @@
   setup Actions' `cache` input does. `restore-keys` is dropped and the
   outcome says so: GitLab's `fallback_keys` match whole keys, not prefixes,
   and losing it only costs speed. Other paths outside the project directory
-  and key expressions GitLab has no Variable for are Gaps. A Job keeps up to 4 caches (`ci-model/list-settings`)."
+  and key expressions GitLab has no Variable for are Gaps. A Job keeps up to 4 caches (`ci-model/caches-per-job-limit`)."
   (:require [clojure.string :as str]
             [gha-to-gitlab.action-translator :as action-translator]
             [gha-to-gitlab.action-translators.inputs :as inputs]

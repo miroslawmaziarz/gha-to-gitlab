@@ -2,22 +2,15 @@
   "Source side: reads a GitHub Actions Workflow into the CI Model."
   (:require [clj-yaml.core :as yaml]
             [clojure.string :as str]
+            [gha-to-gitlab.action-job-settings :as action-job-settings]
             [gha-to-gitlab.action-translator :as action-translator]
             [gha-to-gitlab.action-translators]
             [gha-to-gitlab.ci-model :as ci-model]
-            [gha-to-gitlab.report :as report]))
+            [gha-to-gitlab.report :as report]
+            [gha-to-gitlab.wording :as wording]))
 
 (defn- step-label [step index]
   (str (or (:name step) (:id step) (str "step " (inc index)))))
-
-(defn- yaml-ish
-  "A YAML value as short flow-style text, e.g. `[linux, x64]` or
-  `{name: dist, paths: [dist]}`."
-  [v]
-  (cond
-    (sequential? v) (str "[" (str/join ", " (map yaml-ish v)) "]")
-    (map? v) (str "{" (str/join ", " (map (fn [[k x]] (str (name k) ": " (yaml-ish x))) v)) "}")
-    :else (str v)))
 
 (defn- runner-label
   "The `runs-on` of a Job as one label string: a list of labels is joined
@@ -26,7 +19,7 @@
   [runs-on]
   (cond
     (sequential? runs-on) (str/join ", " runs-on)
-    (map? runs-on) (str/join ", " (map (fn [[k v]] (str (name k) ": " (yaml-ish v))) runs-on))
+    (map? runs-on) (str/join ", " (map (fn [[k v]] (str (name k) ": " (wording/yaml-ish v))) runs-on))
     :else (str runs-on)))
 
 (defn- shell-quote
@@ -101,78 +94,22 @@
       [nothing-left-to-run]
       script)))
 
-(def ^:private conflict-hints
-  "Per Job setting: what to do when two Actions set it to different values."
-  {:image "use one image that has everything the Job needs, or split the Job."
-   :artifacts (str "GitLab keeps one artifacts archive per Job, so add these paths to it"
-                   " or upload them from another Job by hand.")})
-
-(defn- conflict-gap [setting value {:keys [step action]} kept]
-  {:message (str "sets the Job's `" (name setting) "` to `" (yaml-ish value) "`, but Step `" step
-                 "` (Action `" action "`) already set it to `" (yaml-ish kept) "`, which the Job keeps; "
-                 (get conflict-hints setting "settle on one value by hand."))})
-
-(defn- ordinal
-  "`n` as an English ordinal: 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st, ..."
-  [n]
-  (str n (if (#{11 12 13} (mod n 100))
-           "th"
-           (case (mod n 10) 1 "st" 2 "nd" 3 "rd" "th"))))
-
-(defn- too-many-gap [setting limit]
-  {:message (str "adds the " (ordinal (inc limit)) " entry to the Job's `" (name setting) "`, but GitLab allows at most "
-                 limit "; the Job leaves it out, so merge it into another entry by hand.")})
-
-(defn- add-setting
-  "What happens when an Action asks for setting `k` = `v` on top of the
-  `settings` settled so far: `{:value v'}` is the setting's new value, or
-  `{:gap ..}` when the Job keeps the old one. A list setting
-  (`ci-model/list-settings`) appends the Action's entries up to its limit;
-  a map setting (`ci-model/map-settings`) adds the Action's entries unless
-  one clashes with an earlier entry; any other setting keeps the earliest
-  Action's value."
-  [settings set-by k v]
-  (let [old (get settings k)]
-    (if-let [limit (ci-model/list-settings k)]
-      (if (< limit (+ (count old) (count v)))
-        {:gap (too-many-gap k limit)}
-        {:value (into (vec old) v)})
-      (cond
-        (not (contains? settings k)) {:value v}
-        (ci-model/map-settings k)
-        (let [clashes (into {} (filter (fn [[n x]] (and (contains? old n) (not= x (get old n))))) v)]
-          (if (seq clashes)
-            {:gap (conflict-gap k clashes (get set-by k) (select-keys old (keys clashes)))}
-            {:value (merge v old)}))
-        (= v old) {:value old}
-        :else {:gap (conflict-gap k v (get set-by k) old)}))))
-
-(defn- resolve-job-settings
+(defn- settle-job-settings
   "Settles the Job settings the Job's Actions asked for (`:job-settings`)
-  into one map, returned as `:settings`, with `:steps` updated. Steps are in
-  order and the earliest Action to set a setting wins; a later Action that
-  sets it to a different value gets a Gap, counted on its Converted Action.
-  A list setting (`ci-model/list-settings`, such as `:cache`) instead
-  collects every Action's entries, and an Action whose entries go past the
-  limit gets a Gap; a map setting (`ci-model/map-settings`, such as
-  `:variables`) combines them, and an Action with an entry that clashes
-  gets a Gap. Each Converted Action's `:sets` names the settings it
-  supplied that the Job keeps. This is the only place that rule lives."
+  with `action-job-settings/settle`, returned as `:settings`, with `:steps`
+  updated: each Converted Action's `:sets` names the settings the Job kept
+  from it, and a Gap it raised is placed at its Step and counted on it."
   [steps]
-  (reduce (fn [{:keys [settings set-by] :as acc} {:keys [job-settings action location] :as step}]
-            (let [results (for [[k v] job-settings] [k (add-setting settings set-by k v)])
-                  conflicts (for [[_ {:keys [gap]}] results :when gap] (located-gap location gap))
-                  kept (vec (for [[k {:keys [gap]}] results :when (not gap)] k))]
-              (-> acc
-                  (update :steps conj
-                          (cond-> step
-                            (seq kept) (assoc-in [:action :sets] kept)
-                            (seq conflicts) (-> (update :gaps into conflicts)
-                                                (update-in [:action :gap-count] + (count conflicts)))))
-                  (update :settings into (for [[k {:keys [value gap]}] results :when (not gap)] [k value]))
-                  (assoc :set-by (merge (zipmap kept (repeat action)) set-by)))))
-          {:steps [] :settings {} :set-by {}}
-          steps))
+  (let [{:keys [settings results]}
+        (action-job-settings/settle (for [{converted :action :keys [job-settings]} steps]
+                                      {:step (:step converted) :action (:action converted) :settings job-settings}))]
+    {:settings settings
+     :steps (mapv (fn [{:keys [location] :as step} {:keys [kept gaps]}]
+                    (cond-> step
+                      (seq kept) (assoc-in [:action :sets] kept)
+                      (seq gaps) (-> (update :gaps into (map #(located-gap location %) gaps))
+                                     (update-in [:action :gap-count] + (count gaps)))))
+                  steps results)}))
 
 (defn- job-needs
   "The Job ids in a Job's `needs:`, which is one id or a list of them;
@@ -197,7 +134,7 @@
                                              (some-> (:needs job) job-needs))
         {:keys [steps settings]} (->> (:steps job)
                                       (map-indexed #(convert-step workflow-path id %1 %2))
-                                      resolve-job-settings)]
+                                      settle-job-settings)]
     {:job (cond-> {:id id}
             (some? (:runs-on job)) (assoc :runs-on (runner-label (:runs-on job)))
             (seq needs) (assoc :needs needs)

@@ -69,10 +69,3 @@
   (testing "a runs-on expression is a Gap saying it must be resolved by hand, not mapped"
     (is (= [{:message "Job `job0` runs on the expression `${{ matrix.os }}`, which is only known when the Workflow runs; resolve it and set the Job's image and tags by hand."}]
            (:gaps (runner-mapping/apply-runner-mappings (model-running-on "${{ matrix.os }}") {}))))))
-
-(deftest unmapped-label-with-action-image-test
-  (testing "when an Action already sets the image, the unmapped-label Gap asks for tags only"
-    (is (= [{:message "Job `job0` runs on `macos-latest`, which has no Runner Mapping; add one in the Migration Config or set the Job's tags by hand (a setup Action sets its image)."}]
-           (:gaps (runner-mapping/apply-runner-mappings
-                   (assoc-in (model-running-on "macos-latest") [:jobs 0 :action-job-settings] {:image "node:20"})
-                   {}))))))

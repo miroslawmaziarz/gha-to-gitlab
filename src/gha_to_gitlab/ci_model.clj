@@ -11,14 +11,18 @@
   \"dropped (GitLab checks out the repository automatically)\") and how many
   Gaps the translator raised for it. `:sets` names the Job settings the
   Action supplied and the Job kept (such as `[:image]`), so the Migration
-  Report can say where a setting came from; the values themselves are in
-  the Job's `:action-job-settings` (ADR-0003)."
+  Report can say where a setting came from; the values themselves are
+  settings of the Job (ADR-0003)."
   [:map {:closed true}
    [:step :string]
    [:action :string]
    [:outcome [:string {:min 1}]]
    [:gap-count nat-int?]
    [:sets {:optional true} [:vector :keyword]]])
+
+(def caches-per-job-limit
+  "The most caches a Job can have, as GitLab allows."
+  4)
 
 (def cache-key-files-limit
   "The most files a Job cache key can depend on (`cache:key:files`), as
@@ -51,18 +55,6 @@
    ;; how long GitLab keeps them, e.g. "5 days"; missing: the instance default
    [:expire-in {:optional true} [:string {:min 1}]]])
 
-(def list-settings
-  "Job settings that hold a list each Action adds its entries to, instead of
-  one value; per setting, the most entries a Job can hold (GitLab allows 4
-  caches per Job)."
-  {:cache 4})
-
-(def map-settings
-  "Job settings that hold a map each Action adds its entries to, instead of
-  one value (such as `:variables`); an entry two Actions set differently
-  keeps the earlier Action's value."
-  #{:variables})
-
 (def Job
   "One Job: its id, the Jobs it needs, where it runs (runner label, image,
   tags), its settings and script lines, and the Actions it converted."
@@ -82,7 +74,7 @@
    ;; Variables the Job's scripts and tools read, name → value
    [:variables {:optional true} [:map-of [:string {:min 1}] :string]]
    [:script [:vector {:min 1} :string]]
-   [:cache {:optional true} [:vector {:min 1 :max (:cache list-settings)} Cache]]
+   [:cache {:optional true} [:vector {:min 1 :max caches-per-job-limit} Cache]]
    [:artifacts {:optional true} Artifacts]
    [:actions {:optional true} [:vector ConvertedAction]]])
 

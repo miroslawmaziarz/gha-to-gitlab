@@ -132,6 +132,10 @@
     (testing "a Job without Action Job settings keeps its Runner Mapping image"
       (is (= {:id "lint" :runs-on "ubuntu-latest" :image "ubuntu:24.04" :tags [] :script ["make lint"]}
              lint)))
+    (testing "the unmapped label's Gap asks only for tags, since the Action sets the image"
+      (is (str/includes? report
+                         (str "- Job `mac` runs on `macos-latest`, which has no Runner Mapping; add one in the "
+                              "Migration Config or set the Job's tags by hand (a setup Action sets its image)."))))
     (testing "the Migration Report still shows the image the Action set"
       (is (str/includes? report
                          (str "- `mac`: 1 script line; runs on `macos-latest` → no Runner Mapping (see Gaps); "
@@ -219,12 +223,12 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Expected exactly one Workflow, found 0$"
           (migration/convert {:workflows {}})))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
-          #"Expected exactly one Workflow, found 2: .github/workflows/a.yml, .github/workflows/b.yml"
+                          #"Expected exactly one Workflow, found 2: .github/workflows/a.yml, .github/workflows/b.yml"
           (migration/convert {:workflows {".github/workflows/b.yml" "" ".github/workflows/a.yml" ""}})))))
 
 (deftest clone-without-workflows-test
   (testing "a Migration Run against a clone with no Workflow names the folder it looked in"
     (let [src (temp-dir)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-            (re-pattern (str "No Workflow in \\Q" src "/.github/workflows\\E"))
+                            (re-pattern (str "No Workflow in \\Q" src "/.github/workflows\\E"))
             (migration/run! {:source-dir src :output-dir (temp-dir)}))))))

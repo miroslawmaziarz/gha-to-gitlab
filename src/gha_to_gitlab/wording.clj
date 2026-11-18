@@ -1,0 +1,20 @@
+(ns gha-to-gitlab.wording
+  "Small helpers that write Source values as short text, for Gap messages
+  and labels such as a runner group's `runs-on`."
+  (:require [clojure.string :as str]))
+
+(defn yaml-ish
+  "A YAML value as short flow-style text, e.g. `[linux, x64]` or
+  `{name: dist, paths: [dist]}`."
+  [v]
+  (cond
+    (sequential? v) (str "[" (str/join ", " (map yaml-ish v)) "]")
+    (map? v) (str "{" (str/join ", " (map (fn [[k x]] (str (name k) ": " (yaml-ish x))) v)) "}")
+    :else (str v)))
+
+(defn ordinal
+  "`n` as an English ordinal: 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st, ..."
+  [n]
+  (str n (if (#{11 12 13} (mod n 100))
+           "th"
+           (case (mod n 10) 1 "st" 2 "nd" 3 "rd" "th"))))

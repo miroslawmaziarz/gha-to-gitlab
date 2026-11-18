@@ -37,7 +37,7 @@
         [workflow-path workflow-yaml] (single-workflow workflows)
         model (-> (github/workflow->ci-model workflow-yaml {:workflow-path workflow-path})
                   (runner-mapping/apply-runner-mappings runner-mappings)
-                  action-job-settings/apply-action-job-settings)]
+                  action-job-settings/apply-settings)]
     {:model model
      :gitlab-ci-yaml (gitlab/ci-model->gitlab-ci-yaml model)
      :report (report/render {:workflow-path workflow-path :model model})}))

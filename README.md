@@ -182,10 +182,11 @@ Conversion always goes Source → CI Model → Target (ADR-0001). The code still
 - `gha-to-gitlab.action-translator`: the Action Translator extension point (`translate`, keyed by lower-case Action name)
 - `gha-to-gitlab.action-translators`: requires every Action Translator; adding one means a new namespace under `action-translators/` plus one require here
 - `gha-to-gitlab.runner-mapping`: applies Runner Mappings to the CI Model's Jobs
-- `gha-to-gitlab.action-job-settings`: applies Action Job settings (image, cache, artifacts, Variables) after the Runner Mapping (ADR-0002)
+- `gha-to-gitlab.action-job-settings`: Action Job settings (image, cache, artifacts, Variables): settles them per Job (the earliest Action wins, GitLab limits, conflict Gaps) and applies them after the Runner Mapping (ADR-0002)
 - `gha-to-gitlab.config`: reads and validates the optional Migration Config
 - `gha-to-gitlab.gitlab`: writes the CI Model as `.gitlab-ci.yml`
 - `gha-to-gitlab.report`: renders the Migration Report
+- `gha-to-gitlab.wording`: small helpers that write Source values as short text (Gap messages, runner labels)
 - `gha-to-gitlab.migration`: one Migration Run, end to end: `convert` turns Workflow text and a Migration Config into the CI Model and output texts with no file access; `run!` reads the clone and writes the files around it
 - `gha-to-gitlab.cli`: command-line entry point
 
