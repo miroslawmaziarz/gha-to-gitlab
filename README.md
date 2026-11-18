@@ -179,7 +179,7 @@ Conversion always goes Source → CI Model → Target (ADR-0001). The code still
 - `gha-to-gitlab.config`: reads and validates the optional Migration Config
 - `gha-to-gitlab.gitlab`: writes the CI Model as `.gitlab-ci.yml`
 - `gha-to-gitlab.report`: renders the Migration Report
-- `gha-to-gitlab.migration`: one Migration Run, end to end
+- `gha-to-gitlab.migration`: one Migration Run, end to end: `convert` turns Workflow text and a Migration Config into the CI Model and output texts with no file access; `run!` reads the clone and writes the files around it
 - `gha-to-gitlab.cli`: command-line entry point
 
 ## License
