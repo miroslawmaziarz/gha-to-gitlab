@@ -18,3 +18,8 @@
   (str n (if (#{11 12 13} (mod n 100))
            "th"
            (case (mod n 10) 1 "st" 2 "nd" 3 "rd" "th"))))
+
+(defn shell-quote
+  "`s` as one single-quoted POSIX shell word."
+  [s]
+  (str "'" (str/replace s "'" "'\\''") "'"))
