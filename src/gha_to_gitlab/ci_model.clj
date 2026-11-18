@@ -1,7 +1,8 @@
 (ns gha-to-gitlab.ci-model
   "The platform-independent CI Model that every conversion passes through
   (ADR-0001). The Source reader produces it and the Target writer consumes it."
-  (:require [malli.core :as m]
+  (:require [clojure.string :as str]
+            [malli.core :as m]
             [malli.error :as me]))
 
 (def ConvertedAction
@@ -100,10 +101,35 @@
    [:jobs [:vector {:min 1} Job]]
    [:gaps [:vector Gap]]])
 
+(defn dependency-levels
+  "Job id → the Job's level in the dependency order: 1 for a Job with no
+  `:needs`, otherwise one more than the highest level of the Jobs it needs.
+  Throws ex-info naming the Jobs that cannot be ordered, because they need
+  each other in a cycle or need a Job that is missing or in one."
+  [jobs]
+  (let [needs (into {} (map (juxt :id :needs)) jobs)]
+    ;; Jobs come in Source order, not dependency order: each round settles
+    ;; the Jobs whose needed Jobs all have a level
+    (loop [levels {}]
+      (let [settled (for [[id needed] needs
+                          :when (and (not (levels id)) (every? levels needed))]
+                      [id (inc (reduce max 0 (map levels needed)))])]
+        (cond
+          (= (count levels) (count needs)) levels
+          (seq settled) (recur (into levels settled))
+          :else (let [ids (into [] (comp (map :id) (remove levels)) jobs)]
+                  (throw (ex-info (str "Jobs " (str/join ", " (map #(str "`" % "`") ids))
+                                       " cannot be ordered: each needs a Job in a cycle"
+                                       " or a Job that does not exist")
+                                  {:jobs ids}))))))))
+
 (defn validate!
-  "Returns `model` when it matches the CI Model schema, throws ex-info otherwise."
+  "Returns `model` when it matches the CI Model schema and its Jobs can be
+  ordered by their `:needs` (see `dependency-levels`), throws ex-info
+  otherwise."
   [model]
-  (if (m/validate CIModel model)
-    model
+  (when-not (m/validate CIModel model)
     (throw (ex-info "Invalid CI Model"
-                    {:errors (me/humanize (m/explain CIModel model))}))))
+                    {:errors (me/humanize (m/explain CIModel model))})))
+  (dependency-levels (:jobs model))
+  model)

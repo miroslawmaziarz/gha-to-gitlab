@@ -175,9 +175,10 @@
           steps))
 
 (defn- job-needs
-  "The Job ids in a Job's `needs:`, which is one id or a list of them."
+  "The Job ids in a Job's `needs:`, which is one id or a list of them;
+  each id once, as GitLab refuses duplicate needs."
   [needs]
-  (mapv str (if (sequential? needs) needs [needs])))
+  (into [] (comp (map str) (distinct)) (if (sequential? needs) needs [needs])))
 
 (defn- missing-job-gap [workflow-path job-id needed]
   {:workflow workflow-path
@@ -206,34 +207,9 @@
      :gaps (into (mapv #(missing-job-gap workflow-path id %) missing)
                  (mapcat :gaps) steps)}))
 
-(defn- peel
-  "`needs` (Job id → the ids it needs) without the Jobs `done?` says are
-  settled, repeatedly, until none is left to remove."
-  [needs done?]
-  (loop [needs needs]
-    (let [settled (into #{} (comp (filter #(done? needs %)) (map key)) needs)]
-      (if (empty? settled)
-        needs
-        (recur (apply dissoc needs settled))))))
-
-(defn- check-no-cycle!
-  "Throws ex-info naming the Jobs that need each other in a cycle, as GitHub
-  refuses such a Workflow; deriving Stages needs an order."
-  [jobs]
-  (let [cycle (-> (into {} (map (juxt :id #(set (:needs %)))) jobs)
-                  ;; Jobs whose needs are all settled run in some Stage
-                  (peel (fn [needs [_ ns]] (not-any? #(contains? needs %) ns)))
-                  ;; Jobs that only need cyclic Jobs are not in the cycle themselves
-                  (peel (fn [needs [id _]] (not-any? #(contains? % id) (vals needs))))
-                  keys)]
-    (when (seq cycle)
-      (let [ids (filterv (set cycle) (map :id jobs))]
-        (throw (ex-info (str "Jobs " (str/join ", " (map #(str "`" % "`") ids))
-                             " need each other in a cycle")
-                        {:jobs ids}))))))
-
 (defn workflow->ci-model
-  "Converts the YAML text of one Workflow into a validated CI Model.
+  "Converts the YAML text of one Workflow into a validated CI Model; Jobs
+  that need each other in a cycle are refused, as GitHub refuses them.
   `:workflow-path` (the Workflow's path in the Source) is used to name the
   Workflow in Gaps."
   ([workflow-yaml] (workflow->ci-model workflow-yaml {}))
@@ -241,7 +217,6 @@
    (let [workflow (yaml/parse-string workflow-yaml)
          job-ids (into #{} (map (comp name key)) (:jobs workflow))
          jobs (mapv #(convert-job workflow-path job-ids %) (:jobs workflow))]
-     (check-no-cycle! (map :job jobs))
      (ci-model/validate!
       {:jobs (mapv :job jobs)
        :gaps (into [] (mapcat :gaps) jobs)}))))

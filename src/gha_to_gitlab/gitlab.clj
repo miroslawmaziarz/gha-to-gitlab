@@ -17,32 +17,17 @@
   [id]
   (if (global-keywords id) (str id "_job") id))
 
+(defn- stage-name [level] (str "stage-" level))
+
 (defn job-stages
   "The Stage each Job runs in, Job id → Stage name (`stage-1`, `stage-2`,
-  ...): a Job with no `:needs` runs in the first Stage, any other Job in
-  the Stage after the latest Stage of a Job it needs. Nil when every Job
-  runs in the first Stage, as then GitLab's default Stage will do. The
-  Source reader refuses Jobs that need each other in a cycle."
+  ...): the Job's level in the dependency order (`ci-model/dependency-levels`),
+  so Jobs with no `:needs` run in the first Stage and every other Job in the
+  Stage after the latest Job it needs. Nil when no Job has `:needs`, as then
+  GitLab's default Stage runs them all together (ADR-0005)."
   [{:keys [jobs]}]
   (when (some :needs jobs)
-    (let [needs (into {} (map (juxt :id :needs)) jobs)
-          ;; Jobs come in Source order, not dependency order, so settle
-          ;; each Job's Stage number once all the Jobs it needs have one
-          numbers (loop [numbers {}]
-                    (let [settled (for [[id ns] needs
-                                        :when (and (not (numbers id)) (every? numbers ns))]
-                                    [id (inc (reduce max 0 (map numbers ns)))])]
-                      (cond
-                        (= (count numbers) (count needs)) numbers
-                        (empty? settled) (throw (ex-info "Jobs need each other in a cycle or need a missing Job"
-                                                         {:jobs (remove numbers (keys needs))}))
-                        :else (recur (into numbers settled)))))]
-      (update-vals numbers #(str "stage-" %)))))
-
-(defn- stage-names
-  "The Stage names of `job-stages` in run order."
-  [job-stages]
-  (mapv #(str "stage-" %) (range 1 (inc (count (distinct (vals job-stages)))))))
+    (update-vals (ci-model/dependency-levels jobs) stage-name)))
 
 (defn- in-order
   "`m` as an ordered map with `ks` first, in that order, under their GitLab
@@ -75,12 +60,12 @@
                                           {:expire-in :expire_in}))))
 
 (defn- ci-model->ci-file-map
-  "The `.gitlab-ci.yml` content: the Stages, when there is more than one,
+  "The `.gitlab-ci.yml` content: the Stages, when any Job has `:needs`,
   then one entry per Job."
   [model]
   (let [stages (job-stages model)]
     (into (if stages
-            (ordered-map :stages (stage-names stages))
+            (ordered-map :stages (mapv stage-name (range 1 (inc (count (set (vals stages)))))))
             (ordered-map))
           (map (fn [job] [(job-name (:id job)) (gitlab-job (get stages (:id job)) job)]))
           (:jobs model))))

@@ -106,7 +106,7 @@
                            {:id "lint" :script ["make lint"]}]
                     :gaps []})
         parsed (yaml/parse-string yaml-text)]
-    (testing "Stages are listed first, one per step of the dependency order"
+    (testing "Stages are listed first, one per level of the dependency order"
       (is (= ["stage-1" "stage-2" "stage-3"] (:stages parsed)))
       (is (= :stages (first (keys parsed)))))
     (testing "Jobs with no needs run in the first Stage, every other Job in the Stage after the last Job it needs"
@@ -118,6 +118,12 @@
       (is (not (contains? (:build parsed) :needs))))
     (testing "stage and needs come before script"
       (is (= [:stage :needs :script] (keys (:deploy parsed)))))))
+
+(deftest unorderable-jobs-test
+  (testing "a CI Model whose Jobs need a missing Job is refused rather than written"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Jobs `deploy` cannot be ordered"
+          (gitlab/ci-model->gitlab-ci-yaml {:jobs [{:id "deploy" :needs ["bild"] :script ["make deploy"]}]
+                                            :gaps []})))))
 
 (deftest no-needs-no-stages-test
   (testing "without dependencies there is one Stage, so stages are left to GitLab's default"
