@@ -164,9 +164,16 @@ A GitHub Job whose id is a GitLab global keyword (such as `image`, `variables` o
 ## Development
 
 ```sh
-clojure -M:test   # run all tests
-clojure -M:lint   # lint with clj-kondo
+bin/check                  # everything below; what CI and the pre-commit hook run
+clojure -M:test            # run all tests
+clojure -M:lint            # lint with clj-kondo (stricter rules in .clj-kondo/config.edn)
+clojure -M:fmt check       # check formatting with cljfmt; `fix` rewrites (.cljfmt.edn)
+clojure -M:splint src test # idiomatic-Clojure suggestions with Splint (.splint.edn)
+clojure -M:coverage        # test coverage report in target/coverage
+git config core.hooksPath .githooks   # once per clone: run bin/check before each commit
 ```
+
+CI (`.github/workflows/ci.yml`) runs `bin/check` and the coverage report on every pull request and push to `main`. With Claude Code, the project's hooks (`.claude/settings.json`) check each Clojure file Claude writes (`bin/check-file`) and run `bin/check` before Claude finishes a turn that changed Clojure files (`bin/stop-check`).
 
 Conversion always goes Source → CI Model → Target (ADR-0001). The code still uses the original `gha-to-gitlab` namespace prefix.
 

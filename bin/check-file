@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Claude Code PostToolUse hook: checks the Clojure file just written with
+# cljfmt, clj-kondo and Splint. Reads the hook's JSON from stdin. Exits 2
+# with the problems on stderr so Claude sees and fixes them; exits 0 for
+# other files and for clean ones.
+set -uo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$root"
+
+file=$(jq -r '.tool_response.filePath // .tool_input.file_path // empty')
+case "$file" in
+  "$root"/*.clj|"$root"/*.cljc|"$root"/*.cljs|"$root"/*.edn) ;;
+  *) exit 0 ;;
+esac
+[ -f "$file" ] || exit 0
+
+# the three checks run in parallel, each in a JVM tuned for quick startup
+fast="-J-XX:TieredStopAtLevel=1"
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+check() {
+  local name=$1; shift
+  if ! "$@" >"$tmp/$name.out" 2>&1; then
+    { echo "\$ $*"; cat "$tmp/$name.out"; echo; } >"$tmp/$name.problems"
+  fi
+}
+
+check 1-fmt clojure $fast -M:fmt check "$file" &
+check 2-kondo clojure $fast -M:kondo --lint "$file" &
+case "$file" in *.edn) ;; *) check 3-splint clojure $fast -M:splint "$file" & ;; esac
+wait
+problems=$(cat "$tmp"/*.problems 2>/dev/null)
+
+if [ -n "$problems" ]; then
+  printf '%s is not clean; fix it (cljfmt fix: clojure -M:fmt fix %s):\n\n%s' \
+    "${file#"$root"/}" "${file#"$root"/}" "$problems" >&2
+  exit 2
+fi

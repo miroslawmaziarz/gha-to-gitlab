@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Claude Code Stop hook: before Claude finishes a turn in which Clojure or
+# EDN files changed (compared with the last commit), runs bin/check. On
+# failure it exits 2 with the failing output on stderr, so Claude keeps
+# working; if Claude stops again with checks still failing, it lets the stop
+# through and warns the user instead of looping. A state that passed is
+# remembered, so turns that change nothing do not re-run the checks.
+set -uo pipefail
+input=$(cat)
+root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$root"
+
+paths=('*.clj' '*.cljc' '*.cljs' '*.edn')
+state=$( { git diff HEAD -- "${paths[@]}"
+           git ls-files -z --others --exclude-standard -- "${paths[@]}" | xargs -0 -r cat
+         } | sha1sum | cut -d' ' -f1)
+[ -z "$(git status --porcelain -- "${paths[@]}")" ] && exit 0
+passed="$(git rev-parse --git-dir)/claude-check-passed"
+[ "$(cat "$passed" 2>/dev/null)" = "$state" ] && exit 0
+
+if out=$(bin/check 2>&1); then
+  echo "$state" >"$passed"
+  exit 0
+fi
+
+if [ "$(jq -r '.stop_hook_active // false' <<<"$input")" = "true" ]; then
+  jq -n '{systemMessage: "bin/check still fails after Claude tried to fix it; run bin/check to see why."}'
+  exit 0
+fi
+{
+  echo "bin/check failed. Fix these problems before finishing (last 80 lines):"
+  echo
+  tail -n 80 <<<"$out"
+} >&2
+exit 2
