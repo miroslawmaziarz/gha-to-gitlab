@@ -31,7 +31,7 @@
              (-> model :jobs first :actions first :outcome))))))
 
 (deftest unconvertible-version-test
-  (testing "a version range or expression is a Gap, and the Job keeps its Runner Mapping image"
+  (testing "a version range or expression is a Gap, and the Action sets no image (the Job keeps any Runner Mapping image)"
     (let [model (convert (str "      - name: Node\n        uses: actions/setup-node@v4\n"
                               "        with:\n          node-version: ${{ matrix.node }}\n"))]
       (is (nil? (-> model :jobs first action-settings :image)))

@@ -2,7 +2,6 @@
   "The platform-independent CI Model that every conversion passes through
   (ADR-0001). The Source reader produces it and the Target writer consumes it."
   (:require [clojure.string :as str]
-            [gha-to-gitlab.action-job-settings :as action-job-settings]
             [malli.core :as m]
             [malli.error :as me]))
 
@@ -12,14 +11,18 @@
   \"dropped (GitLab checks out the repository automatically)\") and how many
   Gaps the translator raised for it. `:sets` names the Job settings the
   Action supplied and the Job kept (such as `[:image]`), so the Migration
-  Report can say where a setting came from; the values themselves are in
-  the Job's `:action-job-settings` (ADR-0003)."
+  Report can say where a setting came from; the values themselves are
+  settings of the Job (ADR-0003)."
   [:map {:closed true}
    [:step :string]
    [:action :string]
    [:outcome [:string {:min 1}]]
    [:gap-count nat-int?]
    [:sets {:optional true} [:vector :keyword]]])
+
+(def caches-per-job-limit
+  "The most caches a Job can have, as GitLab allows."
+  4)
 
 (def cache-key-files-limit
   "The most files a Job cache key can depend on (`cache:key:files`), as
@@ -71,7 +74,7 @@
    ;; Variables the Job's scripts and tools read, name → value
    [:variables {:optional true} [:map-of [:string {:min 1}] :string]]
    [:script [:vector {:min 1} :string]]
-   [:cache {:optional true} [:vector {:min 1 :max (:cache action-job-settings/list-settings)} Cache]]
+   [:cache {:optional true} [:vector {:min 1 :max caches-per-job-limit} Cache]]
    [:artifacts {:optional true} Artifacts]
    [:actions {:optional true} [:vector ConvertedAction]]])
 

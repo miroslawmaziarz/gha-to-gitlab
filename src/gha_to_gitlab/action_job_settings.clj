@@ -3,15 +3,16 @@
   (such as a setup Action's image), settled per Job by one rule and applied
   after the Runner Mapping (ADR-0002, ADR-0004). The Source reader hands
   `settle` each Step's requests in order and keeps the settled settings on
-  the Job as `:action-job-settings`; `apply-action-job-settings` then puts
+  the Job as `:action-job-settings`; `apply-settings` then puts
   them on the Job."
-  (:require [gha-to-gitlab.wording :as wording]))
+  (:require [gha-to-gitlab.ci-model :as ci-model]
+            [gha-to-gitlab.wording :as wording]))
 
-(def list-settings
+(def ^:private list-settings
   "Job settings that hold a list each Action adds its entries to, instead of
-  one value; per setting, the most entries a Job can hold (GitLab allows 4
-  caches per Job)."
-  {:cache 4})
+  one value; per setting, the most entries a Job can hold (the CI Model
+  records GitLab's limits)."
+  {:cache ci-model/caches-per-job-limit})
 
 (def ^:private map-settings
   "Job settings that hold a map each Action adds its entries to, instead of
@@ -85,7 +86,7 @@
       (and (:image settings) (:image job)) (assoc :runner-mapping-image (:image job)))
     (dissoc job :action-job-settings)))
 
-(defn apply-action-job-settings
+(defn apply-settings
   "Puts every Job's settled `:action-job-settings` on the Job and removes
   them; run after the Runner Mapping, so an Action's image replaces the
   Runner Mapping image. That replaced image is kept as

@@ -1,5 +1,6 @@
 (ns gha-to-gitlab.wording
-  "Small helpers for writing Source values into Gap messages."
+  "Small helpers that write Source values as short text, for Gap messages
+  and labels such as a runner group's `runs-on`."
   (:require [clojure.string :as str]))
 
 (defn yaml-ish

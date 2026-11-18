@@ -101,8 +101,8 @@
   from it, and a Gap it raised is placed at its Step and counted on it."
   [steps]
   (let [{:keys [settings results]}
-        (action-job-settings/settle (for [{:keys [action job-settings]} steps]
-                                      {:step (:step action) :action (:action action) :settings job-settings}))]
+        (action-job-settings/settle (for [{converted :action :keys [job-settings]} steps]
+                                      {:step (:step converted) :action (:action converted) :settings job-settings}))]
     {:settings settings
      :steps (mapv (fn [{:keys [location] :as step} {:keys [kept gaps]}]
                     (cond-> step

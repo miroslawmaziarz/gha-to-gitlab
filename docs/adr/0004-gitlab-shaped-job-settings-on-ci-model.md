@@ -6,11 +6,11 @@ What is GitLab-shaped:
 
 - a cache `:policy` (`pull`, `push`) and `:when` (`always`);
 - a cache key that is either a string or `{:files [..] :prefix ..}`, GitLab's `cache:key:files`;
-- the limits GitLab sets: at most 4 caches per Job (`action-job-settings/list-settings`) and at most 10 files per cache key (`ci-model/cache-key-files-limit`, current GitLab's limit);
+- the limits GitLab sets: at most 4 caches per Job (`ci-model/caches-per-job-limit`) and at most 10 files per cache key (`ci-model/cache-key-files-limit`, current GitLab's limit);
 - artifacts `:exclude` and `:expire-in` as GitLab's duration text (`"5 days"`);
 - one artifacts block per Job, so a second upload in a Job is a Gap instead of a second entry.
 
-The Source reader settles these per Job like any other Action Job setting (ADR-0002): `:cache` collects every Action's entries up to the limit, `:variables` combines them with a clashing Variable as a Gap, and `:artifacts` keeps the earliest Action's value.
+They are settled per Job like any other Action Job setting (`gha-to-gitlab.action-job-settings`, ADR-0002): `:cache` collects every Action's entries up to the limit, `:variables` combines them with a clashing Variable as a Gap, and `:artifacts` keeps the earliest Action's value.
 
 The trade-off: checking the limits while converting Actions lets each Gap name the Step that went over, but a future Target with different limits or no cache policy would need its own values or a translation step.
 
