@@ -162,3 +162,24 @@
                                 "(its key leaves out `runner.os`, which GitLab has no Variable for)\n"
                                 "  - Step `Upload`: Action `actions/upload-artifact@v4` converted to the Job artifacts\n")))
         (is (str/includes? report "No Gaps"))))))
+
+(deftest job-dependencies-migration-run-test
+  (let [out (temp-dir)]
+    (migration/run! {:source-dir (source-with-workflow
+                                  (str "on: push\njobs:\n"
+                                       "  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n"
+                                       "  test:\n    needs: build\n    runs-on: ubuntu-latest\n    steps:\n      - run: make test\n"
+                                       "  deploy:\n    needs: [test, bild]\n    runs-on: ubuntu-latest\n    steps:\n      - run: make deploy\n"))
+                     :output-dir out})
+    (testing "the Pipeline runs the Jobs in Stages in dependency order, keeping needs:"
+      (is (= {:stages ["stage-1" "stage-2" "stage-3"]
+              :build {:stage "stage-1" :image "ubuntu:24.04" :script ["make"]}
+              :test {:stage "stage-2" :needs ["build"] :image "ubuntu:24.04" :script ["make test"]}
+              :deploy {:stage "stage-3" :needs ["test"] :image "ubuntu:24.04" :script ["make deploy"]}}
+             (yaml/parse-string (slurp (io/file out ".gitlab-ci.yml"))))))
+    (testing "the Migration Report shows each Job's Stage and the Jobs it waits for, and the missing Job as a Gap"
+      (let [report (slurp (io/file out "MIGRATION_REPORT.md"))]
+        (is (str/includes? report "- `build`: 1 script line; runs on `ubuntu-latest` → image `ubuntu:24.04`, no tags; Stage `stage-1`\n"))
+        (is (str/includes? report "- `deploy`: 1 script line; runs on `ubuntu-latest` → image `ubuntu:24.04`, no tags; Stage `stage-3`, after `test`\n"))
+        (is (str/includes? report "1 Gap needs a person to finish it:"))
+        (is (str/includes? report "Job `deploy`: needs Job `bild`, which the Workflow does not define"))))))

@@ -102,3 +102,65 @@ jobs:
              (sh "bash" "-c" (-> model :jobs first :script first)))))
     (testing "and no Gap, since dropping those Steps is faithful"
       (is (= [] (:gaps model))))))
+
+(def needs-workflow
+  "on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: make
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - run: make lint
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - run: make test
+  deploy:
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - run: make deploy
+")
+
+(deftest needs-test
+  (let [model (github/workflow->ci-model needs-workflow)]
+    (testing "a Job's needs: in single and list form is carried as a list of Job ids, in Source order"
+      (is (= {"build" nil "lint" nil "test" ["build"] "deploy" ["test" "lint"]}
+             (into {} (map (juxt :id :needs)) (:jobs model)))))
+    (testing "and raises no Gap"
+      (is (= [] (:gaps model)))))
+  (testing "a Job needed twice is listed once, as GitLab refuses duplicate needs"
+    (is (= ["build"]
+           (-> (github/workflow->ci-model
+                (str "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n"
+                     "  test:\n    needs: [build, build]\n    runs-on: ubuntu-latest\n    steps:\n      - run: make test\n"))
+               :jobs second :needs)))))
+
+(deftest missing-needed-job-test
+  (let [model (github/workflow->ci-model
+               (str "on: push\njobs:\n"
+                    "  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n"
+                    "  deploy:\n    needs: [build, bild]\n    runs-on: ubuntu-latest\n    steps:\n      - run: make deploy\n")
+               {:workflow-path ".github/workflows/ci.yml"})]
+    (testing "a needed Job the Workflow does not define is left out of the Job's needs"
+      (is (= ["build"] (-> model :jobs second :needs))))
+    (testing "and is a Gap naming the Workflow, the Job and the missing Job"
+      (is (= [{:workflow ".github/workflows/ci.yml"
+               :job "deploy"
+               :message (str "Workflow `.github/workflows/ci.yml`, Job `deploy`: needs Job `bild`,"
+                             " which the Workflow does not define; the Job no longer waits for it,"
+                             " so add the dependency by hand.")}]
+             (:gaps model))))))
+
+(deftest needs-cycle-test
+  (testing "Jobs that need each other in a cycle, and Jobs that need them, are refused, as GitHub refuses them"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Jobs `a`, `b`, `c` cannot be ordered: each needs a Job in a cycle"
+          (github/workflow->ci-model
+           (str "on: push\njobs:\n"
+                "  a:\n    needs: b\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n"
+                "  b:\n    needs: a\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n"
+                "  c:\n    needs: a\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n"))))))

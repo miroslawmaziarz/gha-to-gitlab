@@ -96,3 +96,37 @@
       (is (= [:image :variables :cache :script] (keys job)))
       (is (= [:A :npm_config_cache] (keys (:variables job))))
       (is (= "$CI_PROJECT_DIR/.npm" (get-in job [:variables :npm_config_cache]))))))
+
+(deftest stages-test
+  (let [yaml-text (gitlab/ci-model->gitlab-ci-yaml
+                   {:jobs [{:id "deploy" :needs ["test" "image"] :script ["make deploy"]}
+                           {:id "image" :script ["docker build ."]}
+                           {:id "test" :needs ["build"] :script ["make test"]}
+                           {:id "build" :script ["make"]}
+                           {:id "lint" :script ["make lint"]}]
+                    :gaps []})
+        parsed (yaml/parse-string yaml-text)]
+    (testing "Stages are listed first, one per level of the dependency order"
+      (is (= ["stage-1" "stage-2" "stage-3"] (:stages parsed)))
+      (is (= :stages (first (keys parsed)))))
+    (testing "Jobs with no needs run in the first Stage, every other Job in the Stage after the last Job it needs"
+      (is (= {:deploy "stage-3" :image_job "stage-1" :test "stage-2" :build "stage-1" :lint "stage-1"}
+             (update-vals (dissoc parsed :stages) :stage))))
+    (testing "needs: names the needed Jobs by their GitLab names, in Source order"
+      (is (= ["test" "image_job"] (-> parsed :deploy :needs)))
+      (is (= ["build"] (-> parsed :test :needs)))
+      (is (not (contains? (:build parsed) :needs))))
+    (testing "stage and needs come before script"
+      (is (= [:stage :needs :script] (keys (:deploy parsed)))))))
+
+(deftest unorderable-jobs-test
+  (testing "a CI Model whose Jobs need a missing Job is refused rather than written"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Jobs `deploy` cannot be ordered"
+          (gitlab/ci-model->gitlab-ci-yaml {:jobs [{:id "deploy" :needs ["bild"] :script ["make deploy"]}]
+                                            :gaps []})))))
+
+(deftest no-needs-no-stages-test
+  (testing "without dependencies there is one Stage, so stages are left to GitLab's default"
+    (is (= {:build {:script ["npm ci" "npm run build"]}
+            :lint {:script ["npm run lint"]}}
+           (yaml/parse-string (gitlab/ci-model->gitlab-ci-yaml model) :keywords true)))))

@@ -17,6 +17,18 @@
   [id]
   (if (global-keywords id) (str id "_job") id))
 
+(defn- stage-name [level] (str "stage-" level))
+
+(defn job-stages
+  "The Stage each Job runs in, Job id → Stage name (`stage-1`, `stage-2`,
+  ...): the Job's level in the dependency order (`ci-model/dependency-levels`),
+  so Jobs with no `:needs` run in the first Stage and every other Job in the
+  Stage after the latest Job it needs. Nil when no Job has `:needs`, as then
+  GitLab's default Stage runs them all together (ADR-0005)."
+  [{:keys [jobs]}]
+  (when (some :needs jobs)
+    (update-vals (ci-model/dependency-levels jobs) stage-name)))
+
 (defn- in-order
   "`m` as an ordered map with `ks` first, in that order, under their GitLab
   names (`rename`, else the key itself); keys `m` lacks are left out."
@@ -31,11 +43,13 @@
             [:key :paths :policy :when]))
 
 (defn- gitlab-job
-  "One GitLab Job, its keys in reading order: where it runs (image, tags),
-  its environment (variables), what it restores (cache), what it runs
-  (script), then what it keeps (artifacts)."
-  [{:keys [image tags variables script cache artifacts]}]
+  "One GitLab Job, its keys in reading order: when it runs (stage, needs),
+  where it runs (image, tags), its environment (variables), what it
+  restores (cache), what it runs (script), then what it keeps (artifacts)."
+  [stage {:keys [needs image tags variables script cache artifacts]}]
   (cond-> (ordered-map)
+    stage (assoc :stage stage)
+    (seq needs) (assoc :needs (mapv job-name needs))
     image (assoc :image image)
     (seq tags) (assoc :tags tags)
     (seq variables) (assoc :variables (into (ordered-map) (sort variables)))
@@ -45,13 +59,19 @@
     artifacts (assoc :artifacts (in-order artifacts [:name :paths :exclude :expire-in]
                                           {:expire-in :expire_in}))))
 
-(defn- ci-model->job-map [model]
-  (into (ordered-map)
-        (map (fn [job] [(job-name (:id job)) (gitlab-job job)]))
-        (:jobs model)))
+(defn- ci-model->ci-file-map
+  "The `.gitlab-ci.yml` content: the Stages, when any Job has `:needs`,
+  then one entry per Job."
+  [model]
+  (let [stages (job-stages model)]
+    (into (if stages
+            (ordered-map :stages (mapv stage-name (range 1 (inc (count (set (vals stages)))))))
+            (ordered-map))
+          (map (fn [job] [(job-name (:id job)) (gitlab-job (get stages (:id job)) job)]))
+          (:jobs model))))
 
 (defn ci-model->gitlab-ci-yaml
   "Renders a CI Model as the text of a `.gitlab-ci.yml`."
   [model]
-  (yaml/generate-string (ci-model->job-map (ci-model/validate! model))
+  (yaml/generate-string (ci-model->ci-file-map (ci-model/validate! model))
                         :dumper-options {:flow-style :block}))
