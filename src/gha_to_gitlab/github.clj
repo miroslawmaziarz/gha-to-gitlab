@@ -59,7 +59,7 @@
   "Converts one Step into `{:script [line ...] :gaps [gap ...]}`; `:gaps`
   lists what could not be converted faithfully, and `:action` records an
   Action that an Action Translator converted. `matrix-values` are the
-  Job's Matrix values (see `matrix/dimension-values`), which an Action's
+  Job's Matrix values (see `matrix/job-matrix`), which an Action's
   inputs may reference."
   [workflow-path job-id matrix-values index step]
   (cond
@@ -147,15 +147,15 @@
         job-variables (variables-of-job workflow-path workflow-variables id job)
         {needs true missing false} (group-by (comp boolean job-ids)
                                              (some-> (:needs job) job-needs))
-        {:keys [matrix] matrix-gaps :gaps} (matrix/job-matrix location (:strategy job))
-        matrix-values (matrix/dimension-values (:strategy job))
-        runs-on-gap (matrix/runs-on-gap location (:runs-on job) matrix-values)
+        all-env-variables (merge workflow-variables (:variables job-variables))
+        {:keys [matrix] matrix-values :values matrix-gaps :gaps} (matrix/job-matrix location (:strategy job))
+        runs-on (some-> (:runs-on job) runner-label)
+        runs-on-gap (matrix/runs-on-gap location runs-on matrix-values)
         {:keys [steps settings]} (->> (:steps job)
                                       (map-indexed #(convert-step workflow-path id matrix-values %1 %2))
-                                      (settle-job-settings
-                                       (merge workflow-variables (:variables job-variables))))]
+                                      (settle-job-settings all-env-variables))]
     {:job (cond-> {:id id :workflow workflow-path}
-            (and (some? (:runs-on job)) (nil? runs-on-gap)) (assoc :runs-on (runner-label (:runs-on job)))
+            (and runs-on (nil? runs-on-gap)) (assoc :runs-on runs-on)
             (seq needs) (assoc :needs needs)
             matrix (assoc :matrix matrix)
             (seq (:variables job-variables)) (assoc :variables (:variables job-variables))
@@ -165,7 +165,7 @@
      :gaps (-> (mapv #(missing-job-gap workflow-path id %) missing)
                (into matrix-gaps)
                (cond-> runs-on-gap (conj runs-on-gap))
-               (into (matrix/variable-clash-gaps location matrix (merge workflow-variables (:variables job-variables))))
+               (into (matrix/variable-clash-gaps location matrix all-env-variables))
                (into (:gaps job-variables))
                (into (mapcat :gaps) steps))}))
 

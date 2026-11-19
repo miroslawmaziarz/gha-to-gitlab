@@ -84,6 +84,13 @@ _Avoid_: event, `on:` (in prose)
 A set of variable combinations that runs one Job once per combination.
 _Avoid_: strategy, parallel jobs
 
+**Matrix dimension**:
+One key of a Matrix with its list of values (`node-version: [18, 20]`); the Matrix runs every combination of its dimensions' values.
+_Avoid_: axis, vector
+
+**Matrix Variable**:
+The GitLab Variable a Matrix dimension becomes in the Job's parallel matrix, named after its key (`node-version` → `node_version`); `${{ matrix.x }}` references become references to it.
+
 ### Settings and values
 
 **Repository Settings**:

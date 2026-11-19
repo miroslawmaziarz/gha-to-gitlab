@@ -59,10 +59,29 @@
   "Variables, name → value."
   [:map-of [:string {:min 1}] :string])
 
+(def variable-name-chars
+  "The characters a GitLab Variable name may have, as the inside of a regex
+  character class."
+  "A-Za-z0-9_")
+
+(def jobs-per-matrix-limit
+  "The most Jobs one GitLab parallel matrix can make."
+  200)
+
+(defn- matrix-jobs
+  "How many Jobs parallel matrix `matrix` makes: each entry makes one per
+  combination of its Variables' values."
+  [matrix]
+  (reduce + (map #(reduce * (map count (vals %))) matrix)))
+
 (def Matrix
   "A GitLab parallel matrix: the Job runs once per combination of each
-  entry's Variable values (ADR-0009)."
-  [:vector {:min 1} [:map-of [:re #"^[A-Za-z0-9_]+$"] [:vector {:min 1} :string]]])
+  entry's Variable values (ADR-0009), at most `jobs-per-matrix-limit`
+  times."
+  [:and
+   [:vector {:min 1} [:map-of [:re (re-pattern (str "^[" variable-name-chars "]+$"))] [:vector {:min 1} :string]]]
+   [:fn {:error/message (str "a parallel matrix makes at most " jobs-per-matrix-limit " Jobs")}
+    #(<= (matrix-jobs %) jobs-per-matrix-limit)]])
 
 (def Job
   "One Job: its id, the Jobs it needs, where it runs (runner label, image,

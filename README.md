@@ -25,7 +25,7 @@ Repositories, issues and pull requests are out of scope; GitLab's built-in GitHu
 | Step `env:` | Job `variables`, when every Step agrees on the value or the Job already has it; a Gap otherwise (ADR-0007) |
 | `${{ env.X }}`, `${{ secrets.X }}` in commands and `env:` | `${X}`, plus one Gap per Secret to create it as a masked Variable |
 | `strategy.matrix` | the Job's `parallel: matrix`, one Variable per dimension (`node-version` → `node_version`); `include`, `exclude`, `max-parallel` and `fail-fast` other than `false` are Gaps (ADR-0009) |
-| `${{ matrix.x }}` in commands, `env:` and Action inputs | `${x}`, so `node-version: ${{ matrix.node }}` gives the image `node:${node}`; a value the image tag can't follow (`lts/*`) is a Gap |
+| `${{ matrix.x }}` in commands, `env:` and Action inputs | `${x}`, so `node-version: ${{ matrix.node }}` gives the image `node:${node}`; a value the image tag can't follow (`lts/*`) is a Gap, and the Job keeps its Runner Mapping image |
 | `needs:` | the Job's `needs:`, plus derived `stages` (`stage-1`, `stage-2`, …) so every Job runs after the Jobs it needs |
 | `actions/checkout` | dropped: GitLab checks out the repository itself |
 | `actions/setup-node`, `setup-python`, `setup-java` | the Job's `image` (`node:20`, `python:3.12`, `eclipse-temurin:21`, …), overriding the Runner Mapping image |
