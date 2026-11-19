@@ -90,7 +90,7 @@
   what the Migration Report shows, naming the Gap's location first; the
   optional keys are that location in the Source (`:input` names the Action
   input an Action Translator could not convert, `:secret` the Secret a Gap
-  is about)."
+  is about, `:trigger` the Trigger)."
   [:map
    [:message :string]
    [:workflow {:optional true} :string]
@@ -98,12 +98,26 @@
    [:step {:optional true} :string]
    [:action {:optional true} :string]
    [:input {:optional true} :string]
-   [:secret {:optional true} :string]])
+   [:secret {:optional true} :string]
+   [:trigger {:optional true} :string]])
+
+(def WorkflowRule
+  "One GitLab workflow rule (ADR-0008): a Pipeline whose variables match
+  `:if` (missing: every Pipeline) starts, or, with `:when \"never\"`, does
+  not; the first matching rule decides."
+  [:and
+   [:map {:closed true}
+    [:if {:optional true} [:string {:min 1}]]
+    [:when {:optional true} [:enum "never"]]]
+   [:fn {:error/message "a rule needs :if or :when"} seq]])
 
 (def CIModel
-  "The CI Model of one Migration Run: the Pipeline's Variables (from the
-  Workflow's `env:`), its Jobs, in Source order, and every Gap raised so far."
+  "The CI Model of one Migration Run: the workflow rules that start its
+  Pipeline (from the Workflow's Triggers; none: every Pipeline starts), the
+  Pipeline's Variables (from the Workflow's `env:`), its Jobs, in Source
+  order, and every Gap raised so far."
   [:map {:closed true}
+   [:workflow-rules {:optional true} [:vector {:min 1} WorkflowRule]]
    [:variables {:optional true} Variables]
    [:jobs [:vector {:min 1} Job]]
    [:gaps [:vector Gap]]])

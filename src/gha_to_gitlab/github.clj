@@ -7,6 +7,7 @@
             [gha-to-gitlab.action-translators]
             [gha-to-gitlab.ci-model :as ci-model]
             [gha-to-gitlab.gap :as gap]
+            [gha-to-gitlab.triggers :as triggers]
             [gha-to-gitlab.variables :as variables]
             [gha-to-gitlab.wording :as wording]))
 
@@ -230,10 +231,14 @@
    (let [workflow (read-workflow workflow-yaml)
          job-ids (into #{} (map (comp name key)) (:jobs workflow))
          {workflow-variables :variables workflow-gaps :gaps} (env-variables {:workflow workflow-path} (:env workflow))
+         ;; YAML 1.1 reads the key `on` as true
+         {:keys [rules] trigger-gaps :gaps} (triggers/workflow-rules workflow-path (get workflow true (:on workflow)))
          jobs (mapv #(convert-job workflow-path workflow-variables job-ids %) (:jobs workflow))]
      (ci-model/validate!
       (cond-> {:jobs (mapv :job jobs)
-               :gaps (-> workflow-gaps
+               :gaps (-> trigger-gaps
+                         (into workflow-gaps)
                          (into (mapcat :gaps) jobs)
                          (into (variables/secret-gaps workflow-path (secret-uses workflow))))}
+        (seq rules) (assoc :workflow-rules rules)
         (seq workflow-variables) (assoc :variables workflow-variables))))))

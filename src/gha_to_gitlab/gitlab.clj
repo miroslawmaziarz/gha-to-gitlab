@@ -62,11 +62,13 @@
                                           {:expire-in :expire_in}))))
 
 (defn- ci-model->ci-file-map
-  "The `.gitlab-ci.yml` content: the Stages, when any Job has `:needs`,
-  the Pipeline's Variables, when it has any, then one entry per Job."
-  [{:keys [variables] :as model}]
+  "The `.gitlab-ci.yml` content: the workflow rules, the Stages, when any
+  Job has `:needs`, the Pipeline's Variables, then one entry per Job; each
+  of the first three only when there is any."
+  [{:keys [workflow-rules variables] :as model}]
   (let [stages (job-stages model)]
     (into (cond-> (ordered-map)
+            (seq workflow-rules) (assoc :workflow {:rules (mapv #(in-order % [:if :when]) workflow-rules)})
             stages (assoc :stages (mapv stage-name (range 1 (inc (count (set (vals stages)))))))
             (seq variables) (assoc :variables (into (ordered-map) (sort variables))))
           (map (fn [job] [(job-name (:id job)) (gitlab-job (get stages (:id job)) job)]))

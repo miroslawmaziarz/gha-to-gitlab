@@ -23,7 +23,8 @@ jobs:
   (testing "each Job with run: Steps becomes a CI Model Job, naming its Workflow, whose script is the commands in order"
     (is (= {:jobs [{:id "build" :workflow "workflow" :runs-on "ubuntu-latest" :script ["npm ci" "npm run build"]}
                    {:id "lint" :workflow "workflow" :runs-on "ubuntu-latest" :script ["npm run lint"]}]
-            :gaps []}
+            :gaps []
+            :workflow-rules [{:if "$CI_PIPELINE_SOURCE == \"push\""}]}
            (github/workflow->ci-model two-job-workflow)))))
 
 (deftest invalid-ci-model-test

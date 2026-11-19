@@ -9,7 +9,7 @@
   (migration/convert {:workflows {".github/workflows/ci.yml" workflow-yaml}}))
 
 (defn- ci-file [workflow-yaml]
-  (yaml/parse-string (:gitlab-ci-yaml (convert-workflow workflow-yaml)) :keywords false))
+  (dissoc (yaml/parse-string (:gitlab-ci-yaml (convert-workflow workflow-yaml)) :keywords false) "workflow"))
 
 (deftest workflow-and-job-env-test
   (testing "Workflow-level env: becomes Pipeline variables and Job-level env: becomes Job variables, as strings"
@@ -21,9 +21,9 @@
                          "jobs:\n  build:\n"
                          "    env:\n      NODE_ENV: production\n      DEBUG: true\n"
                          "    steps:\n      - run: npm run build\n")))))
-  (testing "the Pipeline variables come before the Jobs"
+  (testing "the Pipeline variables come after the workflow rules and before the Jobs"
     (is (str/starts-with? (:gitlab-ci-yaml (convert-workflow "on: push\nenv:\n  A: x\njobs:\n  b:\n    steps:\n      - run: make\n"))
-                          "variables:"))))
+                          "workflow:\n  rules:\n  - if: $CI_PIPELINE_SOURCE == \"push\"\nvariables:"))))
 
 (defn- gap-messages [workflow-yaml]
   (mapv :message (:gaps (:model (convert-workflow workflow-yaml)))))
