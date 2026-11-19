@@ -55,11 +55,17 @@
    ;; how long GitLab keeps them, e.g. "5 days"; missing: the instance default
    [:expire-in {:optional true} [:string {:min 1}]]])
 
+(def Variables
+  "Variables, name → value."
+  [:map-of [:string {:min 1}] :string])
+
 (def Job
   "One Job: its id, the Jobs it needs, where it runs (runner label, image,
   tags), its settings and script lines, and the Actions it converted."
   [:map {:closed true}
    [:id [:string {:min 1}]]
+   ;; the Workflow the Job comes from, its path in the Source
+   [:workflow {:optional true} [:string {:min 1}]]
    [:runs-on {:optional true} :string]
    ;; ids of the Jobs this Job runs after, in Source order
    [:needs {:optional true} [:vector {:min 1} [:string {:min 1}]]]
@@ -71,29 +77,34 @@
    ;; yet applied; `gha-to-gitlab.action-job-settings` applies them after
    ;; the Runner Mapping and removes this key
    [:action-job-settings {:optional true} [:map-of :keyword any?]]
-   ;; Variables the Job's scripts and tools read, name → value
-   [:variables {:optional true} [:map-of [:string {:min 1}] :string]]
+   ;; Variables the Job's scripts and tools read: its own `env:` and those
+   ;; its Actions set
+   [:variables {:optional true} Variables]
    [:script [:vector {:min 1} :string]]
    [:cache {:optional true} [:vector {:min 1 :max caches-per-job-limit} Cache]]
    [:artifacts {:optional true} Artifacts]
    [:actions {:optional true} [:vector ConvertedAction]]])
 
 (def Gap
-  "One Gap. `:message` is what the Migration Report shows; the optional keys
-  say where in the Source the Gap is (`:input` names the Action input an
-  Action Translator could not convert)."
+  "One Gap, as `gha-to-gitlab.gap/at` makes it (ADR-0006). `:message` is
+  what the Migration Report shows, naming the Gap's location first; the
+  optional keys are that location in the Source (`:input` names the Action
+  input an Action Translator could not convert, `:secret` the Secret a Gap
+  is about)."
   [:map
    [:message :string]
    [:workflow {:optional true} :string]
    [:job {:optional true} :string]
    [:step {:optional true} :string]
    [:action {:optional true} :string]
-   [:input {:optional true} :string]])
+   [:input {:optional true} :string]
+   [:secret {:optional true} :string]])
 
 (def CIModel
-  "The CI Model of one Migration Run: its Jobs, in Source order, and every
-  Gap raised so far."
+  "The CI Model of one Migration Run: the Pipeline's Variables (from the
+  Workflow's `env:`), its Jobs, in Source order, and every Gap raised so far."
   [:map {:closed true}
+   [:variables {:optional true} Variables]
    [:jobs [:vector {:min 1} Job]]
    [:gaps [:vector Gap]]])
 

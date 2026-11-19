@@ -75,7 +75,7 @@
              (yaml/parse-string gitlab-ci-yaml))))
     (testing "the Migration Report shows the Job has no Runner Mapping and lists the Gap"
       (is (str/includes? report "- `mac`: 1 script line; runs on `macos-latest` → no Runner Mapping (see Gaps)"))
-      (is (str/includes? report "- Job `mac` runs on `macos-latest`, which has no Runner Mapping")))))
+      (is (str/includes? report "- Workflow `.github/workflows/ci.yml`, Job `mac`: runs on `macos-latest`, which has no Runner Mapping")))))
 
 (deftest converted-actions-report-test
   (let [{:keys [report]}
@@ -127,14 +127,14 @@
               "  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make lint\n"))
         [mac lint] (:jobs model)]
     (testing "a Job with no Runner Mapping gets its Action's image, and no Runner Mapping image is recorded"
-      (is (= {:id "mac" :runs-on "macos-latest" :image "node:22" :script ["npm test"]}
+      (is (= {:id "mac" :workflow ".github/workflows/ci.yml" :runs-on "macos-latest" :image "node:22" :script ["npm test"]}
              (dissoc mac :actions))))
     (testing "a Job without Action Job settings keeps its Runner Mapping image"
-      (is (= {:id "lint" :runs-on "ubuntu-latest" :image "ubuntu:24.04" :tags [] :script ["make lint"]}
+      (is (= {:id "lint" :workflow ".github/workflows/ci.yml" :runs-on "ubuntu-latest" :image "ubuntu:24.04" :tags [] :script ["make lint"]}
              lint)))
     (testing "the unmapped label's Gap asks only for tags, since the Action sets the image"
       (is (str/includes? report
-                         (str "- Job `mac` runs on `macos-latest`, which has no Runner Mapping; add one in the "
+                         (str "- Workflow `.github/workflows/ci.yml`, Job `mac`: runs on `macos-latest`, which has no Runner Mapping; add one in the "
                               "Migration Config or set the Job's tags by hand (a setup Action sets its image)."))))
     (testing "the Migration Report still shows the image the Action set"
       (is (str/includes? report
@@ -198,7 +198,7 @@
               "      - run: npm test\n")
          {:runner-mappings {"ubuntu-latest" {:image "ubuntu:22.04" :tags ["docker"]}}})]
     (testing "a Migration Run from Workflow text and a Migration Config, with no files, gives the finished CI Model"
-      (is (= [{:id "build" :runs-on "ubuntu-latest" :image "node:20" :runner-mapping-image "ubuntu:22.04"
+      (is (= [{:id "build" :workflow ".github/workflows/ci.yml" :runs-on "ubuntu-latest" :image "node:20" :runner-mapping-image "ubuntu:22.04"
                :tags ["docker"] :script ["npm test"]}]
              (mapv #(dissoc % :actions) (:jobs model)))))
     (testing "and the .gitlab-ci.yml text, where the Action's image replaces the Runner Mapping image and the tags stay"
@@ -232,3 +232,13 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             (re-pattern (str "No Workflow in \\Q" src "/.github/workflows\\E"))
             (migration/run! {:source-dir src :output-dir (temp-dir)}))))))
+
+(deftest runner-mapping-gap-location-test
+  (let [{:keys [model]}
+        (migration/convert {:workflows {".github/workflows/mac.yml"
+                                        "on: push\njobs:\n  mac:\n    runs-on: macos-latest\n    steps:\n      - run: xcodebuild\n"}})]
+    (testing "a Runner Mapping Gap names the Workflow and the Job, like every other Gap"
+      (is (= [{:workflow ".github/workflows/mac.yml" :job "mac"
+               :message (str "Workflow `.github/workflows/mac.yml`, Job `mac`: runs on `macos-latest`, which has no "
+                             "Runner Mapping; add one in the Migration Config or set the Job's image and tags by hand.")}]
+             (:gaps model))))))

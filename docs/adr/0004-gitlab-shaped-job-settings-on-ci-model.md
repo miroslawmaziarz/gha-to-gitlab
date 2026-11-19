@@ -10,7 +10,7 @@ What is GitLab-shaped:
 - artifacts `:exclude` and `:expire-in` as GitLab's duration text (`"5 days"`);
 - one artifacts block per Job, so a second upload in a Job is a Gap instead of a second entry.
 
-They are settled per Job like any other Action Job setting (`gha-to-gitlab.action-job-settings`, ADR-0002): `:cache` collects every Action's entries up to the limit, `:variables` combines them with a clashing Variable as a Gap, and `:artifacts` keeps the earliest Action's value.
+They are settled per Job like any other Action Job setting (`gha-to-gitlab.action-job-settings`, ADR-0002): `:cache` collects every Action's entries up to the limit, `:variables` combines them with a clashing Variable as a Gap (and never overrides the Job's `env:`, ADR-0007), and `:artifacts` keeps the earliest Action's value.
 
 The trade-off: checking the limits while converting Actions lets each Gap name the Step that went over, but a future Target with different limits or no cache policy would need its own values or a translation step.
 

@@ -6,7 +6,8 @@
             [gha-to-gitlab.action-translator :as action-translator]
             [gha-to-gitlab.action-translators]
             [gha-to-gitlab.ci-model :as ci-model]
-            [gha-to-gitlab.report :as report]
+            [gha-to-gitlab.gap :as gap]
+            [gha-to-gitlab.variables :as variables]
             [gha-to-gitlab.wording :as wording]))
 
 (defn- step-label [step index]
@@ -22,37 +23,24 @@
     (map? runs-on) (str/join ", " (map (fn [[k v]] (str (name k) ": " (wording/yaml-ish v))) runs-on))
     :else (str runs-on)))
 
-(defn- shell-quote
-  "`s` as one single-quoted POSIX shell word."
-  [s]
-  (str "'" (str/replace s "'" "'\\''") "'"))
-
 (defn- step-location
-  "Where a Step that uses an Action is in the Source: the Gap keys
-  `:workflow :job :step :action`, plus `:prefix`, the start of a Gap message
-  naming them all."
+  "Where a Step that uses an Action is in the Source, as a Gap location
+  (`gha-to-gitlab.gap/at`): `:workflow :job :step :action`."
   [workflow-path job-id step index]
-  (let [label (step-label step index)
-        action (:uses step)]
-    {:workflow workflow-path
-     :job job-id
-     :step label
-     :action action
-     :prefix (str "Workflow `" workflow-path "`, Job `" job-id "`, Step `" label
-                  "`: Action `" action "` ")}))
+  {:workflow workflow-path
+   :job job-id
+   :step (step-label step index)
+   :action (:uses step)})
 
 (defn- located-gap
-  "A Gap at `location` whose message continues the location's prefix."
-  [{:keys [prefix] :as location} {:keys [message] :as gap}]
-  (merge gap
-         (dissoc location :prefix)
-         {:message (str prefix message)}))
+  "Gap `gap` (`{:message ..}`, optionally the `:input` it is about), raised
+  for the Action at `location`, placed there."
+  [location {:keys [input message]}]
+  (gap/at (assoc location :input input) message))
 
 (defn- unknown-action [{:keys [action] :as location}]
-  {:script [(str "echo " (shell-quote (str "Gap: Action " action " was not converted; see "
-                                           report/file-name)))]
-   :gaps [(located-gap location {:message (str "has no Action Translator;"
-                                               " replace its placeholder script line by hand.")})]})
+  {:script [(gap/placeholder-line action)]
+   :gaps [(gap/at location "has no Action Translator; replace its placeholder script line by hand.")]})
 
 (defn- translated-action [{:keys [step action] :as location} translation]
   (let [{:keys [script gaps outcome job-settings]} translation]
@@ -71,7 +59,7 @@
   Action that an Action Translator converted."
   [workflow-path job-id index step]
   (cond
-    (:run step) {:script [(:run step)]}
+    (:run step) {:script [(variables/rewrite-references (:run step))]}
     (:uses step) (let [location (step-location workflow-path job-id step index)]
                    (if-let [translation (action-translator/translate step)]
                      (translated-action location translation)
@@ -82,7 +70,7 @@
 (def ^:private nothing-left-to-run
   "The script line of a Job whose Steps all converted to no script lines
   (e.g. only `actions/checkout`); GitLab needs at least one."
-  (str "echo " (shell-quote "Nothing left to run after conversion")))
+  (str "echo " (wording/shell-quote "Nothing left to run after conversion")))
 
 (defn- job-script
   "The Job's script lines from its converted Steps. When the Job has Steps
@@ -96,13 +84,14 @@
 
 (defn- settle-job-settings
   "Settles the Job settings the Job's Actions asked for (`:job-settings`)
-  with `action-job-settings/settle`, returned as `:settings`, with `:steps`
+  with `action-job-settings/settle`, against the Variables the Job has from
+  `env:` (`env-variables`), returned as `:settings`, with `:steps`
   updated: each Converted Action's `:sets` names the settings the Job kept
   from it, and a Gap it raised is placed at its Step and counted on it."
-  [steps]
+  [env-variables steps]
   (let [{:keys [settings results]}
-        (action-job-settings/settle (for [{converted :action :keys [job-settings]} steps]
-                                      {:step (:step converted) :action (:action converted) :settings job-settings}))]
+        (action-job-settings/settle env-variables (for [{converted :action :keys [job-settings]} steps]
+                                                    {:step (:step converted) :action (:action converted) :settings job-settings}))]
     {:settings settings
      :steps (mapv (fn [{:keys [location] :as step} {:keys [kept gaps]}]
                     (cond-> step
@@ -118,31 +107,118 @@
   (into [] (comp (map str) (distinct)) (if (sequential? needs) needs [needs])))
 
 (defn- missing-job-gap [workflow-path job-id needed]
-  {:workflow workflow-path
-   :job job-id
-   :message (str "Workflow `" workflow-path "`, Job `" job-id "`: needs Job `" needed
-                 "`, which the Workflow does not define; the Job no longer waits for it,"
-                 " so add the dependency by hand.")})
+  (gap/at {:workflow workflow-path :job job-id}
+          (str "needs Job `" needed "`, which the Workflow does not define; the Job no longer waits for it,"
+               " so add the dependency by hand.")))
+
+(defn- env-variables
+  "The Variables of the `env:` at `location` (whose values are the texts
+  GitHub reads, see `read-workflow`) as `{:variables {..} :gaps [..]}`; an
+  `env:` that is an expression has no Variables and is a Gap."
+  [location env]
+  (if (or (nil? env) (map? env))
+    {:variables (variables/env->variables env) :gaps []}
+    {:variables {} :gaps [(variables/expression-env-gap location env)]}))
+
+(defn- variables-of-job
+  "The Job's Variables and the Gaps raised for them (see
+  `variables/job-variables`), given the Workflow's Variables."
+  [workflow-path workflow-variables id job]
+  (let [own (env-variables {:workflow workflow-path :job id} (:env job))
+        steps (map-indexed (fn [index step]
+                             (let [location {:workflow workflow-path :job id :step (step-label step index)}]
+                               (assoc (env-variables location (:env step)) :location location)))
+                           (:steps job))
+        lifted (variables/job-variables {:workflow workflow-variables :job (:variables own)}
+                                        (map #(select-keys % [:location :variables]) steps))]
+    (update lifted :gaps #(-> (:gaps own) (into (mapcat :gaps) steps) (into %)))))
 
 (defn- convert-job
   "Converts one Job into `{:job .. :gaps [..]}`. `job-ids` are the ids of
   every Job in the Workflow; a `needs:` entry naming any other Job is a Gap
   and is left out of the Job's `:needs`."
-  [workflow-path job-ids [job-id job]]
+  [workflow-path workflow-variables job-ids [job-id job]]
   (let [id (name job-id)
+        job-variables (variables-of-job workflow-path workflow-variables id job)
         {needs true missing false} (group-by (comp boolean job-ids)
                                              (some-> (:needs job) job-needs))
         {:keys [steps settings]} (->> (:steps job)
                                       (map-indexed #(convert-step workflow-path id %1 %2))
-                                      settle-job-settings)]
-    {:job (cond-> {:id id}
+                                      (settle-job-settings
+                                       (merge workflow-variables (:variables job-variables))))]
+    {:job (cond-> {:id id :workflow workflow-path}
             (some? (:runs-on job)) (assoc :runs-on (runner-label (:runs-on job)))
             (seq needs) (assoc :needs needs)
+            (seq (:variables job-variables)) (assoc :variables (:variables job-variables))
             true (assoc :script (job-script steps))
             (some :action steps) (assoc :actions (into [] (keep :action) steps))
             (seq settings) (assoc :action-job-settings settings))
-     :gaps (into (mapv #(missing-job-gap workflow-path id %) missing)
-                 (mapcat :gaps) steps)}))
+     :gaps (-> (mapv #(missing-job-gap workflow-path id %) missing)
+               (into (:gaps job-variables))
+               (into (mapcat :gaps) steps))}))
+
+(defn- env-texts [env]
+  (if (map? env) (vals env) [env]))
+
+(defn- secret-uses
+  "The Source texts that can reference Secrets, as `variables/secret-gaps`
+  takes them: the Workflow's `env:` values, then per Job its `env:` values
+  and each Step's `env:` values and command. These are the texts whose
+  references `variables` rewrites."
+  [workflow]
+  (cons {:texts (env-texts (:env workflow))}
+        (for [[job-id job] (:jobs workflow)]
+          {:job (name job-id)
+           :texts (concat (env-texts (:env job))
+                          (mapcat #(concat (env-texts (:env %)) [(:run %)]) (:steps job)))})))
+
+(defn- marked-get
+  "The value under key `k` of a map read with clj-yaml's `:mark`."
+  [marked k]
+  (some (fn [[mk v]] (when (= k (:unmark mk)) v)) (:unmark marked)))
+
+(defn- env-text
+  "The text GitHub reads from one marked `env:` value: a string as it is,
+  and any other scalar from how it is written in `source` (clj-yaml reads
+  YAML 1.1, where `010` is 8 and `yes` is true; GitHub reads YAML 1.2)."
+  [source {value :unmark :keys [start end]}]
+  (cond
+    (string? value) value
+    (nil? value) ""
+    :else (variables/plain-scalar-text (subs source (:index start) (:index end)))))
+
+(defn- source-env
+  "The `env:` read from `marked` (a map read with `:mark`): a map of name
+  → the text GitHub reads, or the `env:` value itself when it is not a map;
+  nil when there is none."
+  [source marked]
+  (when-let [env (marked-get marked "env")]
+    (if (map? (:unmark env))
+      ;; a name is text as written, even one YAML 1.1 reads otherwise (`YES`)
+      (into {}
+            (map (fn [[{k :unmark :keys [start end]} v]]
+                   [(keyword (if (string? k) k (subs source (:index start) (:index end))))
+                    (env-text source v)]))
+            (:unmark env))
+      (:unmark env))))
+
+(defn- read-workflow
+  "The Workflow in YAML text `source`, with every `env:` (Workflow, Job,
+  Step) holding the texts GitHub reads (see `source-env`)."
+  [source]
+  (let [workflow (yaml/parse-string source)
+        marked (yaml/parse-string source :mark true)
+        with-env (fn [m marked] (cond-> m (marked-get marked "env") (assoc :env (source-env source marked))))]
+    (cond-> (with-env workflow marked)
+      (map? (:jobs workflow))
+      (update :jobs (fn [jobs]
+                      (let [marked-jobs (marked-get marked "jobs")]
+                        (into (empty jobs)
+                              (for [[job-id job] jobs
+                                    :let [marked-job (marked-get marked-jobs (name job-id))]]
+                                [job-id (cond-> (with-env job marked-job)
+                                          (sequential? (:steps job))
+                                          (update :steps #(mapv with-env % (:unmark (marked-get marked-job "steps")))))]))))))))
 
 (defn workflow->ci-model
   "Converts the YAML text of one Workflow into a validated CI Model; Jobs
@@ -151,9 +227,13 @@
   Workflow in Gaps."
   ([workflow-yaml] (workflow->ci-model workflow-yaml {}))
   ([workflow-yaml {:keys [workflow-path] :or {workflow-path "workflow"}}]
-   (let [workflow (yaml/parse-string workflow-yaml)
+   (let [workflow (read-workflow workflow-yaml)
          job-ids (into #{} (map (comp name key)) (:jobs workflow))
-         jobs (mapv #(convert-job workflow-path job-ids %) (:jobs workflow))]
+         {workflow-variables :variables workflow-gaps :gaps} (env-variables {:workflow workflow-path} (:env workflow))
+         jobs (mapv #(convert-job workflow-path workflow-variables job-ids %) (:jobs workflow))]
      (ci-model/validate!
-      {:jobs (mapv :job jobs)
-       :gaps (into [] (mapcat :gaps) jobs)}))))
+      (cond-> {:jobs (mapv :job jobs)
+               :gaps (-> workflow-gaps
+                         (into (mapcat :gaps) jobs)
+                         (into (variables/secret-gaps workflow-path (secret-uses workflow))))}
+        (seq workflow-variables) (assoc :variables workflow-variables))))))

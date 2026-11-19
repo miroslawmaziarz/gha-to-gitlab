@@ -23,7 +23,7 @@ jobs:
     (defmethod action-translator/translate "example/greet" [step]
       {:script [(str "echo hello " (get-in step [:with :who]))]})
     (try
-      (is (= {:jobs [{:id "build" :runs-on "ubuntu-latest" :script ["echo hello world" "echo hello GitLab"]}]
+      (is (= {:jobs [{:id "build" :workflow "workflow" :runs-on "ubuntu-latest" :script ["echo hello world" "echo hello GitLab"]}]
               :gaps []}
              (update (github/workflow->ci-model greet-workflow) :jobs
                      (partial mapv #(dissoc % :actions)))))

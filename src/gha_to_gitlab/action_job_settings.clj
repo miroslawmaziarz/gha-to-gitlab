@@ -26,10 +26,21 @@
    :artifacts (str "GitLab keeps one artifacts archive per Job, so add these paths to it"
                    " or upload them from another Job by hand.")})
 
-(defn- conflict-gap [setting value {:keys [step action]} kept]
-  {:message (str "sets the Job's `" (name setting) "` to `" (wording/yaml-ish value) "`, but Step `" step
-                 "` (Action `" action "`) already set it to `" (wording/yaml-ish kept) "`, which the Job keeps; "
+(defn- conflict-gap
+  "The Gap of an Action asking for `setting` = `value` when the Job keeps
+  `kept`, set by the Step `set-by` names or, when it is nil, by `env:`."
+  [setting value set-by kept]
+  {:message (str "sets the Job's `" (name setting) "` to `" (wording/yaml-ish value) "`, but "
+                 (if-let [{:keys [step action]} set-by]
+                   (str "Step `" step "` (Action `" action "`) already set it")
+                   "`env:` already sets it")
+                 " to `" (wording/yaml-ish kept) "`, which the Job keeps; "
                  (get conflict-hints setting "settle on one value by hand."))})
+
+(defn- clashes
+  "The entries of map `v` that map `old` holds with another value."
+  [old v]
+  (into {} (filter (fn [[n x]] (and (contains? old n) (not= x (get old n))))) v))
 
 (defn- too-many-gap [setting limit]
   {:message (str "adds the " (wording/ordinal (inc limit)) " entry to the Job's `" (name setting)
@@ -38,28 +49,35 @@
 
 (defn- add-setting
   "What happens when an Action asks for setting `k` = `v` on top of the
-  `settings` settled so far (`set-by`: setting → the request that set it):
-  `{:value v'}` is the setting's new value, or `{:gap ..}` when the Job
-  keeps the old one."
-  [settings set-by k v]
-  (let [old (get settings k)]
+  `settings` settled so far (`set-by`: setting → the request that set it)
+  and the Variables the Job has from `env:`, which an Action's `:variables`
+  may not contradict: `{:value v'}` is the setting's new value, or
+  `{:gap ..}` when the Job keeps the old one."
+  [env-variables settings set-by k v]
+  (let [old (get settings k)
+        env-clashes (when (= :variables k) (clashes env-variables v))]
     (if-let [limit (list-settings k)]
       (if (< limit (+ (count old) (count v)))
         {:gap (too-many-gap k limit)}
         {:value (into (vec old) v)})
       (cond
+        (seq env-clashes) {:gap (conflict-gap k env-clashes nil (select-keys env-variables (keys env-clashes)))}
         (not (contains? settings k)) {:value v}
         (map-settings k)
-        (let [clashes (into {} (filter (fn [[n x]] (and (contains? old n) (not= x (get old n))))) v)]
-          (if (seq clashes)
-            {:gap (conflict-gap k clashes (get set-by k) (select-keys old (keys clashes)))}
+        (let [action-clashes (clashes old v)]
+          (if (seq action-clashes)
+            {:gap (conflict-gap k action-clashes (get set-by k) (select-keys old (keys action-clashes)))}
             {:value (merge v old)}))
         (= v old) {:value old}
         :else {:gap (conflict-gap k v (get set-by k) old)}))))
 
 (defn settle
-  "Settles one Job's Action Job settings. `requests` are the Job's Steps in
-  order, each `{:step label :action uses-value :settings {setting value}}`
+  "Settles one Job's Action Job settings. `env-variables` are the Variables
+  the Job has from `env:` (Workflow, Job and lifted Step entries; none when
+  left out): an Action's `:variables` that contradict one of them are left
+  out with a Gap, so the Source's own values win, and they are not part of
+  the returned settings. `requests` are the Job's Steps in order, each
+  `{:step label :action uses-value :settings {setting value}}`
   (`:settings` may be empty). The earliest Action to set a setting wins, and
   a later Action asking for a different value gets a Gap; a list setting
   (`list-settings`, such as `:cache`) collects every Action's entries up to
@@ -68,21 +86,26 @@
   result per request, in order: `{:kept [setting ..] :gaps [{:message ..}]}`,
   the settings the Job kept from it and the Gaps it raised (their messages
   continue a sentence that names the Step and Action)."
-  [requests]
-  (-> (reduce (fn [{:keys [settings set-by] :as acc} {:keys [step action] :as request}]
-                (let [outcomes (for [[k v] (:settings request)] [k (add-setting settings set-by k v)])
-                      kept (vec (for [[k {:keys [gap]}] outcomes :when (not gap)] k))]
-                  (-> acc
-                      (update :results conj {:kept kept :gaps (into [] (keep (comp :gap second)) outcomes)})
-                      (update :settings into (for [[k {:keys [value gap]}] outcomes :when (not gap)] [k value]))
-                      (assoc :set-by (merge (zipmap kept (repeat {:step step :action action})) set-by)))))
-              {:settings {} :set-by {} :results []}
-              requests)
-      (dissoc :set-by)))
+  ([requests] (settle {} requests))
+  ([env-variables requests]
+   (-> (reduce (fn [{:keys [settings set-by] :as acc} {:keys [step action] :as request}]
+                 (let [outcomes (for [[k v] (:settings request)] [k (add-setting env-variables settings set-by k v)])
+                       kept (vec (for [[k {:keys [gap]}] outcomes :when (not gap)] k))]
+                   (-> acc
+                       (update :results conj {:kept kept :gaps (into [] (keep (comp :gap second)) outcomes)})
+                       (update :settings into (for [[k {:keys [value gap]}] outcomes :when (not gap)] [k value]))
+                       (assoc :set-by (merge (zipmap kept (repeat {:step step :action action})) set-by)))))
+               {:settings {} :set-by {} :results []}
+               requests)
+       (dissoc :set-by))))
 
-(defn- apply-to-job [{settings :action-job-settings :as job}]
+(defn- apply-to-job
+  "Puts the Job's settled Action Job settings on it; Variables are added to
+  the Job's own, which win."
+  [{settings :action-job-settings :as job}]
   (if (seq settings)
-    (cond-> (merge (dissoc job :action-job-settings) settings)
+    (cond-> (merge (dissoc job :action-job-settings) (dissoc settings :variables))
+      (:variables settings) (assoc :variables (merge (:variables settings) (:variables job)))
       (and (:image settings) (:image job)) (assoc :runner-mapping-image (:image job)))
     (dissoc job :action-job-settings)))
 

@@ -1,14 +1,12 @@
 (ns gha-to-gitlab.report
   "Renders the Migration Report: what a Migration Run converted and every Gap."
   (:require [clojure.string :as str]
-            [gha-to-gitlab.gitlab :as gitlab]))
+            [gha-to-gitlab.gitlab :as gitlab]
+            [gha-to-gitlab.wording :refer [backticked]]))
 
 (def file-name
   "The name of the Migration Report file."
   "MIGRATION_REPORT.md")
-
-(defn- backticked [ids]
-  (str/join ", " (map #(str "`" % "`") ids)))
 
 (defn- image-origin
   "Where an image an Action set came from, e.g. \"from Step `Node` (Action
