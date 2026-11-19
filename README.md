@@ -2,7 +2,7 @@
 
 Convert a GitHub Actions Workflow to GitLab CI, with a Migration Report of everything that still needs a person. Written in Clojure.
 
-> **Status:** early. It converts one Workflow per Migration Run, including the most common Actions and each Job's runner. Matrices and `if:` conditions are not converted yet (see the open issues). See `GLOSSARY.md` for the domain language and `docs/adr/` for key decisions.
+> **Status:** early. It converts one Workflow per Migration Run, including the most common Actions, each Job's runner, Matrices and simple `if:` conditions (see the open issues for what is missing). See `GLOSSARY.md` for the domain language and `docs/adr/` for key decisions.
 
 ## What it does
 
@@ -26,6 +26,10 @@ Repositories, issues and pull requests are out of scope; GitLab's built-in GitHu
 | `${{ env.X }}`, `${{ secrets.X }}` in commands and `env:` | `${X}`, plus one Gap per Secret to create it as a masked Variable |
 | `strategy.matrix` | the Job's `parallel: matrix`, one Variable per dimension (`node-version` → `node_version`); `include`, `exclude`, `max-parallel` and `fail-fast` other than `false` are Gaps (ADR-0009) |
 | `${{ matrix.x }}` in commands, `env:` and Action inputs | `${x}`, so `node-version: ${{ matrix.node }}` gives the image `node:${node}`; a value the image tag can't follow (`lts/*`) is a Gap, and the Job keeps its Runner Mapping image |
+| Job `if:` comparing `github.ref`, `ref_name`, `ref_type`, `head_ref`, `base_ref`, `event_name` (`==`, `!=`, `startsWith`, `&&`, `\|\|`, `!`) | the Job's `rules: - if:`, which the Jobs that need it also get, as GitHub skips them too (ADR-0010) |
+| `always()`, `failure()`, `!cancelled()` beside a Job's condition | the rule's `when: always` / `on_failure` (the Job's needs on conditioned Jobs become `optional`) |
+| Step `if: always()` / `failure()` on `actions/upload-artifact` | `artifacts: when: always` / `on_failure`; any other Step `if:` is a Gap |
+| other `if:` expressions | a Gap quoting the expression |
 | `needs:` | the Job's `needs:`, plus derived `stages` (`stage-1`, `stage-2`, …) so every Job runs after the Jobs it needs |
 | `actions/checkout` | dropped: GitLab checks out the repository itself |
 | `actions/setup-node`, `setup-python`, `setup-java` | the Job's `image` (`node:20`, `python:3.12`, `eclipse-temurin:21`, …), overriding the Runner Mapping image |
@@ -161,8 +165,8 @@ clojure -M:run --config migration.edn path/to/github-clone path/to/output
 ### Current limits
 
 - The clone must contain exactly one Workflow under `.github/workflows/` (#10).
-- Not converted yet: `if:` conditions on Jobs and Steps (#9, #17). A Step's `if:` is ignored without a Gap.
-- `${{ secrets.X }}`, `${{ env.X }}` and `${{ matrix.x }}` are rewritten only as whole expressions in commands and `env:` values (and `${{ matrix.x }}` in Action inputs); inside larger expressions, or `env`/`secrets` in Action `with:` inputs, they are left as they are (#9). A rewritten reference inside single quotes in a command no longer expands, and `shell:` other than the default is not considered.
+- A Job's `if:` converts only when it compares the ref, branch name or Trigger (`==`, `!=`, `startsWith`, `&&`, `||`, `!`) with status functions beside the whole condition; GitHub compares strings ignoring case, GitLab does not. A Step's `if:` is a Gap, except an upload's `always()`/`failure()`.
+- `${{ secrets.X }}`, `${{ env.X }}` and `${{ matrix.x }}` are rewritten only as whole expressions in commands and `env:` values (and `${{ matrix.x }}` in Action inputs); inside larger expressions, or `env`/`secrets` in Action `with:` inputs, they are left as they are. A rewritten reference inside single quotes in a command no longer expands, and `shell:` other than the default is not considered.
 - `cache: pnpm` and `cache: sbt` on setup Actions, and cache paths outside the project, have no faithful GitLab form, so they become Gaps. `restore-keys` is dropped with a note in the Action's outcome.
 - Generated settings follow current GitLab (for example, up to 10 files in `cache:key:files`). Older self-managed instances may need adjustments.
 
@@ -193,6 +197,7 @@ Conversion always goes Source → CI Model → Target (ADR-0001). The code still
 - `gha-to-gitlab.runner-mapping`: applies Runner Mappings to the CI Model's Jobs
 - `gha-to-gitlab.action-job-settings`: Action Job settings (image, cache, artifacts, Variables): settles them per Job (the earliest Action wins, GitLab limits, conflict Gaps) and applies them after the Runner Mapping (ADR-0002)
 - `gha-to-gitlab.triggers`: Triggers as GitLab workflow rules (glob → regex, filter order) and Trigger Gaps
+- `gha-to-gitlab.conditions`: `if:` expressions (a small parser) as GitLab rule conditions, status functions as `when`, and Job rules inherited through `needs:`
 - `gha-to-gitlab.matrix`: Matrices as GitLab parallel matrices, Matrix Gaps, and Action inputs checked per Matrix value
 - `gha-to-gitlab.variables`: `env:` as Variables (lifting a Step's into its Job), `${{ env.X }}`/`${{ secrets.X }}`/`${{ matrix.x }}` rewriting and Secret Gaps
 - `gha-to-gitlab.config`: reads and validates the optional Migration Config

@@ -6,16 +6,11 @@
             [gha-to-gitlab.gap :as gap]
             [gha-to-gitlab.wording :as wording]))
 
-(def ^:private regex-operators
-  "The characters that mean something in a GitLab (RE2) regex literal,
-  plus `/`, which ends the literal."
-  (set "\\.^$|?*+()[]{}/"))
-
 (defn- literal
-  "Character `c` as it matches itself in a GitLab regex: regex operators
-  and `/`, which ends the regex, are escaped."
+  "Character `c` as it matches itself in a GitLab regex (see
+  `wording/regex-literal`)."
   [c]
-  (if (regex-operators c) (str "\\" c) (str c)))
+  (wording/regex-literal (str c)))
 
 (defn- class-token
   "The token of character class `[inside]`: `[:atom regex]`, or `[:gap

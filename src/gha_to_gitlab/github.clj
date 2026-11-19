@@ -6,6 +6,7 @@
             [gha-to-gitlab.action-translator :as action-translator]
             [gha-to-gitlab.action-translators]
             [gha-to-gitlab.ci-model :as ci-model]
+            [gha-to-gitlab.conditions :as conditions]
             [gha-to-gitlab.gap :as gap]
             [gha-to-gitlab.matrix :as matrix]
             [gha-to-gitlab.triggers :as triggers]
@@ -55,21 +56,57 @@
               :outcome (or outcome "converted")
               :gap-count (count gaps)}}))
 
+(defn- step-status
+  "The status a Step's `if:` asks for when it is only a status function:
+  `:success` when it changes nothing (no `if:`, or `success()`),
+  `\"always\"` or `\"on_failure\"`; nil for any other `if:`."
+  [step]
+  (if-some [text (:if step)]
+    (let [{:keys [gap condition] rule-when :when} (conditions/parse-if (str text))]
+      (when-not (or gap condition)
+        (case rule-when
+          nil :success
+          ("always" "on_failure") rule-when
+          nil)))
+    :success))
+
+(defn- keep-artifacts
+  "Translation `translation` with its Job artifacts kept `status`
+  (`always`, `on_failure`, see `step-status`), when it has any."
+  [status translation]
+  (cond-> translation
+    (and (string? status) (get-in translation [:job-settings :artifacts]))
+    (assoc-in [:job-settings :artifacts :when] status)))
+
+(defn- step-if-gap
+  "The Gap of a Step whose `if:` its conversion leaves out."
+  [workflow-path job-id index step]
+  (gap/at {:workflow workflow-path :job job-id :step (step-label step index)}
+          (str "its `if:` `" (:if step) "` is left out; GitLab runs every script line of the Job,"
+               " so guard the Step's lines by hand.")))
+
 (defn- convert-step
   "Converts one Step into `{:script [line ...] :gaps [gap ...]}`; `:gaps`
   lists what could not be converted faithfully, and `:action` records an
   Action that an Action Translator converted. `matrix-values` are the
   Job's Matrix values (see `matrix/job-matrix`), which an Action's
-  inputs may reference."
+  inputs may reference. A Step's `if:` is a Gap, unless it only asks an
+  upload to keep its artifacts `always()` or on `failure()` (#17)."
   [workflow-path job-id matrix-values index step]
-  (cond
-    (:run step) {:script [(variables/rewrite-references (:run step))]}
-    (:uses step) (let [location (step-location workflow-path job-id step index)]
-                   (if-let [translation (matrix/translate-action action-translator/translate step matrix-values)]
-                     (translated-action location translation)
-                     (unknown-action location)))
-    :else (throw (ex-info (str "Job '" job-id "' has a Step with neither run: nor uses:")
-                          {:job job-id :step step}))))
+  (let [status (step-status step)
+        converted (cond
+                    (:run step) {:script [(variables/rewrite-references (:run step))]}
+                    (:uses step) (let [location (step-location workflow-path job-id step index)]
+                                   (if-let [translation (some->> (matrix/translate-action action-translator/translate
+                                                                                          step matrix-values)
+                                                                 (keep-artifacts status))]
+                                     (translated-action location translation)
+                                     (unknown-action location)))
+                    :else (throw (ex-info (str "Job '" job-id "' has a Step with neither run: nor uses:")
+                                          {:job job-id :step step})))
+        kept? (or (= :success status) (and status (get-in converted [:job-settings :artifacts :when])))]
+    (cond-> converted
+      (not kept?) (update :gaps (fnil conj []) (step-if-gap workflow-path job-id index step)))))
 
 (def ^:private nothing-left-to-run
   "The script line of a Job whose Steps all converted to no script lines
@@ -252,6 +289,14 @@
                                           (sequential? (:steps job))
                                           (update :steps #(mapv with-env % (:unmark (marked-get marked-job "steps")))))]))))))))
 
+(defn- with-rules
+  "CI Model Job `job` with its rules and optional needs (see
+  `conditions/job-rules`)."
+  [job {:keys [rules optional-needs]}]
+  (cond-> job
+    (seq rules) (assoc :rules rules)
+    (seq optional-needs) (assoc :optional-needs optional-needs)))
+
 (defn workflow->ci-model
   "Converts the YAML text of one Workflow into a validated CI Model; Jobs
   that need each other in a cycle are refused, as GitHub refuses them.
@@ -263,12 +308,18 @@
          job-ids (into #{} (map (comp name key)) (:jobs workflow))
          {workflow-variables :variables workflow-gaps :gaps} (env-variables {:workflow workflow-path} (:env workflow))
          {:keys [rules] trigger-gaps :gaps} (triggers/workflow-rules workflow-path (:on workflow))
-         jobs (mapv #(convert-job workflow-path workflow-variables job-ids %) (:jobs workflow))]
+         jobs (mapv #(convert-job workflow-path workflow-variables job-ids %) (:jobs workflow))
+         job-rules (conditions/job-rules workflow-path
+                                         (map (fn [{:keys [job]} [_ source-job]]
+                                                (cond-> (select-keys job [:id :needs])
+                                                  (some? (:if source-job)) (assoc :if (str (:if source-job)))))
+                                              jobs (:jobs workflow)))]
      (ci-model/validate!
-      (cond-> {:jobs (mapv :job jobs)
+      (cond-> {:jobs (mapv #(with-rules % (get job-rules (:id %))) (map :job jobs))
                :gaps (-> trigger-gaps
                          (into workflow-gaps)
                          (into (mapcat :gaps) jobs)
+                         (into (mapcat :gaps) (vals job-rules))
                          (into (variables/secret-gaps workflow-path (secret-uses workflow))))}
         (seq rules) (assoc :workflow-rules rules)
         (seq workflow-variables) (assoc :variables workflow-variables))))))

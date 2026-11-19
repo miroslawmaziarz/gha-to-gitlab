@@ -29,3 +29,9 @@
   "`s` as one single-quoted POSIX shell word."
   [s]
   (str "'" (str/replace s "'" "'\\''") "'"))
+
+(defn regex-literal
+  "Text `s` as it matches itself inside a GitLab regex literal (`/../`, RE2):
+  regex operators and `/`, which ends the literal, are escaped."
+  [s]
+  (str/replace s #"[\\.^$|?*+()\[\]{}/]" "\\\\$0"))
