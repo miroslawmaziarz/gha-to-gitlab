@@ -1,7 +1,8 @@
 (ns gha-to-gitlab.wording
   "Small text helpers shared by the conversion: Source values as short
   text (for Gap messages and labels such as a runner group's `runs-on`),
-  lists of code spans, English ordinals, and shell quoting for script lines."
+  lists of code spans, English ordinals, shell quoting for script lines,
+  and text escaped for GitLab regex literals in rules."
   (:require [clojure.string :as str]))
 
 (defn yaml-ish

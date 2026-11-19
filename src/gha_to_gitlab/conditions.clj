@@ -6,9 +6,10 @@
   (:require [clojure.string :as str]
             [gha-to-gitlab.ci-model :as ci-model]
             [gha-to-gitlab.gap :as gap]
+            [gha-to-gitlab.triggers :as triggers]
             [gha-to-gitlab.wording :as wording]))
 
-(defn- unsupported
+(defn- gap-reason!
   "Stops the conversion of a condition with Gap reason `reason`."
   [reason]
   (throw (ex-info reason {::reason reason})))
@@ -28,7 +29,7 @@
     (if (str/blank? s)
       found
       (let [m (re-find (re-pattern (str "^(?:" token-pattern ")")) s)]
-        (when-not m (unsupported (str "`" (first s) "` is not part of an expression this can read")))
+        (when-not m (gap-reason! (str "`" (first s) "` is not part of an expression this can read")))
         (recur (subs s (count m))
                (cond
                  (str/blank? m) found
@@ -45,7 +46,7 @@
   "The tokens after operator `op`, which must come first."
   [[[kind value] & more] op]
   (when-not (and (= :op kind) (= op value))
-    (unsupported (str "`" op "` is missing")))
+    (gap-reason! (str "`" op "` is missing")))
   more)
 
 (defn- parse-arguments
@@ -60,7 +61,7 @@
           [(conj args arg) (expect more ")")])))))
 
 (defn- parse-primary
-  "A string, number, name, call or parenthesised expression: `[e rest]`."
+  "A string, number, name, call or parenthesised expression: `[tree rest]`."
   [[[kind value :as token] & more]]
   (case kind
     :string [[:string value] more]
@@ -70,13 +71,13 @@
               [[:call (str/lower-case value) args] after])
             [[:name value] more])
     :op (if (= "(" value)
-          (let [[e after] (parse-or more)]
-            [e (expect after ")")])
-          (unsupported (str "`" value "` is not where this can read it")))
-    (unsupported (if token (str "`" value "` is not where this can read it") "the expression ends too early"))))
+          (let [[tree after] (parse-or more)]
+            [tree (expect after ")")])
+          (gap-reason! (str "`" value "` is not where this can read it")))
+    (gap-reason! (if token (str "`" value "` is not where this can read it") "the expression ends too early"))))
 
 (defn- parse-comparison
-  "An operand, or two compared with `==` or `!=`: `[e rest]`."
+  "An operand, or two compared with `==` or `!=`: `[tree rest]`."
   [ts]
   (let [[left more] (parse-primary ts)
         [kind op] (first more)]
@@ -85,55 +86,78 @@
       (let [[right after] (parse-primary (rest more))]
         [[:compare op left right] after])
       (and (= :op kind) (#{"<" ">" "<=" ">="} op))
-      (unsupported (str "GitLab rules cannot compare with `" op "`"))
+      (gap-reason! (str "GitLab rules cannot compare with `" op "`"))
       :else [left more])))
 
 (defn- parse-not
-  "A comparison, or `!` before one: `[e rest]`."
+  "A comparison, or `!` before one: `[tree rest]`."
   [ts]
   (if (= [:op "!"] (first ts))
-    (let [[e more] (parse-not (rest ts))]
-      [[:not e] more])
+    (let [[tree more] (parse-not (rest ts))]
+      [[:not tree] more])
     (parse-comparison ts)))
 
 (defn- parse-chain
   "`parse-operand` operands joined by `op` as `[kind operands..]`."
   [ts op kind parse-operand]
-  (loop [[e more] (parse-operand ts) operands []]
-    (let [operands (conj operands e)]
+  (loop [[tree more] (parse-operand ts) operands []]
+    (let [operands (conj operands tree)]
       (if (= [:op op] (first more))
         (recur (parse-operand (rest more)) operands)
-        [(if (= 1 (count operands)) e (into [kind] operands)) more]))))
+        [(if (= 1 (count operands)) tree (into [kind] operands)) more]))))
 
-(defn- parse-and [ts] (parse-chain ts "&&" :and parse-not))
+(defn- parse-and
+  "Operands joined by `&&`: `[tree rest]`."
+  [ts]
+  (parse-chain ts "&&" :and parse-not))
 
-(defn- parse-or [ts] (parse-chain ts "||" :or parse-and))
+(defn- parse-or
+  "Operands joined by `||`, the whole of an expression: `[tree rest]`."
+  [ts]
+  (parse-chain ts "||" :or parse-and))
 
 (defn- parse
   "The syntax tree of GitHub expression `text`, with or without `${{ }}`."
   [text]
   (let [inner (or (second (re-matches #"(?s)\s*\$\{\{(.*)\}\}\s*" text)) text)
-        [e more] (parse-or (tokens inner))]
-    (when (seq more) (unsupported (str "`" (second (first more)) "` is not where this can read it")))
-    e))
+        [tree more] (parse-or (tokens inner))]
+    (when (seq more) (gap-reason! (str "`" (second (first more)) "` is not where this can read it")))
+    tree))
 
 ;; GitLab conditions: [:compare var op value], [:set var], [:unset var],
 ;; [:and ..], [:or ..]
 
-(def ^:private trigger-sources
-  "GitHub Trigger name → the GitLab Pipeline source of the Pipelines it
-  becomes (ADR-0008)."
-  {"push" "push"
-   "pull_request" "merge_request_event"
-   "schedule" "schedule"
-   "workflow_dispatch" "web"})
-
 (def ^:private name-variables
   "GitHub context values that are a GitLab predefined Variable as they
   are."
-  {"github.ref_name" "$CI_COMMIT_REF_NAME"
-   "github.head_ref" "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"
+  {"github.head_ref" "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"
    "github.base_ref" "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"})
+
+(def ^:private ref-name-variables
+  "The Variables `github.ref_name` is one of: a branch or tag name. Both
+  are unset in a merge request Pipeline, where GitHub's `ref_name` is
+  `N/merge` and matches no branch name either."
+  ["$CI_COMMIT_BRANCH" "$CI_COMMIT_TAG"])
+
+(def ^:private ref-prefixes
+  "The `github.ref` prefixes that name a branch or tag, and the Variable
+  holding the rest."
+  [["refs/heads/" "$CI_COMMIT_BRANCH"]
+   ["refs/tags/" "$CI_COMMIT_TAG"]])
+
+(defn- split-ref
+  "`github.ref` text `ref-text` as `[variable rest]` (see `ref-prefixes`),
+  or a Gap reason naming `what`."
+  [ref-text what]
+  (or (some (fn [[prefix variable]]
+              (when (str/starts-with? ref-text prefix) [variable (subs ref-text (count prefix))]))
+            ref-prefixes)
+      (gap-reason! (str what " names no branch (`refs/heads/`) or tag (`refs/tags/`)"))))
+
+(defn- either
+  "`make` applied to each Variable of `variables`, joined by `||`."
+  [variables make]
+  (into [:or] (map make) variables))
 
 (defn- negate
   "GitLab condition `condition` negated; GitLab rules have no `!`, so the
@@ -151,34 +175,30 @@
 (defn- quoted
   "`s` as a GitLab rule string."
   [s]
-  (when (re-find #"[\"\\]" s) (unsupported (str "`" s "` has a quote or backslash")))
+  (when (re-find #"[\"\\]" s) (gap-reason! (str "`" s "` has a quote or backslash")))
   (str "\"" s "\""))
-
-(defn- ref-comparison
-  "`github.ref` compared (`op`) with `ref-text`: a branch or tag comparison."
-  [op ref-text]
-  (cond
-    (str/starts-with? ref-text "refs/heads/") [:compare "$CI_COMMIT_BRANCH" op (quoted (subs ref-text 11))]
-    (str/starts-with? ref-text "refs/tags/") [:compare "$CI_COMMIT_TAG" op (quoted (subs ref-text 10))]
-    :else (unsupported (str "`github.ref` is compared with `" ref-text "`, which names no branch (`refs/heads/`) or tag (`refs/tags/`)"))))
 
 (defn- compare-value
   "Context value `context` (such as `github.ref`) compared (`op`) with the
   string `value`."
   [op context value]
-  (let [condition (case context
-                    "github.ref" (ref-comparison "==" value)
-                    "github.event_name" (if-let [source (trigger-sources value)]
-                                          [:compare "$CI_PIPELINE_SOURCE" "==" (quoted source)]
-                                          (unsupported (str "the Trigger `" value "` has no GitLab Pipeline source")))
-                    "github.ref_type" (case value
-                                        "tag" [:set "$CI_COMMIT_TAG"]
-                                        "branch" [:set "$CI_COMMIT_BRANCH"]
-                                        (unsupported (str "`github.ref_type` is never `" value "`")))
-                    (if-let [variable (name-variables context)]
-                      [:compare variable "==" (quoted value)]
-                      (unsupported (str "`" context "` has no GitLab Variable"))))]
-    (cond-> condition (= "!=" op) negate)))
+  (let [equal (case context
+                "github.ref" (let [[variable rest-text] (split-ref value (str "`github.ref` is compared with `" value "`, which"))]
+                               [:compare variable "==" (quoted rest-text)])
+                "github.ref_name" (either ref-name-variables #(vector :compare % "==" (quoted value)))
+                "github.event_name" (if-let [source (triggers/pipeline-sources value)]
+                                      [:compare "$CI_PIPELINE_SOURCE" "==" (quoted source)]
+                                      (gap-reason! (str "the Trigger `" value "` has no GitLab Pipeline source")))
+                ;; GitHub's `ref_type` is `branch` in a pull request too,
+                ;; where GitLab sets no `$CI_COMMIT_BRANCH`
+                "github.ref_type" (case value
+                                    "tag" [:set "$CI_COMMIT_TAG"]
+                                    "branch" [:unset "$CI_COMMIT_TAG"]
+                                    (gap-reason! (str "`github.ref_type` is never `" value "`")))
+                (if-let [variable (name-variables context)]
+                  [:compare variable "==" (quoted value)]
+                  (gap-reason! (str "`" context "` has no GitLab Variable"))))]
+    (cond-> equal (= "!=" op) negate)))
 
 (def ^:private status-functions
   "GitHub's status functions → the GitLab rule `when` they become, nil
@@ -189,80 +209,82 @@
    "cancelled" ::cancelled})
 
 (defn- prefix-match
-  "`variable` matching the regex of everything starting with `prefix`; a
-  `variable` that is set when `prefix` is empty."
+  "`variable` matching the regex of everything starting with `prefix`,
+  ignoring case as GitHub's `startsWith` does; a `variable` that is set
+  when `prefix` is empty."
   [variable prefix]
   (if (= "" prefix)
     [:set variable]
-    [:compare variable "=~" (str "/^" (wording/regex-literal prefix) "/")]))
+    [:compare variable "=~" (str "/^" (wording/regex-literal prefix) "/i")]))
 
 (defn- starts-with
-  "`startsWith(context, prefix)`: a branch or tag regex for `github.ref`,
-  a regex on the Variable of a branch name."
+  "`startsWith(context, prefix)`: a branch or tag regex for `github.ref`
+  and `github.ref_name`, a regex on the Variable of a branch name."
   [[[context-kind context] [prefix-kind prefix] :as args]]
   (when-not (and (= 2 (count args)) (= :name context-kind) (= :string prefix-kind))
-    (unsupported "GitLab rules can say `startsWith` only of a ref or branch name and a string"))
-  (cond
-    (not= "github.ref" context)
+    (gap-reason! "GitLab rules can say `startsWith` only of a ref or branch name and a string"))
+  (case context
+    "github.ref" (apply prefix-match (split-ref prefix (str "`" prefix "`")))
+    "github.ref_name" (either ref-name-variables #(prefix-match % prefix))
     (if-let [variable (name-variables context)]
       (prefix-match variable prefix)
-      (unsupported (str "`" context "` has no GitLab Variable")))
-    (str/starts-with? prefix "refs/heads/") (prefix-match "$CI_COMMIT_BRANCH" (subs prefix 11))
-    (str/starts-with? prefix "refs/tags/") (prefix-match "$CI_COMMIT_TAG" (subs prefix 10))
-    :else (unsupported (str "`" prefix "` names no branch (`refs/heads/`) or tag (`refs/tags/`) prefix"))))
+      (gap-reason! (str "`" context "` has no GitLab Variable")))))
 
 (defn- condition
-  "The GitLab condition of syntax tree `e`."
-  [[kind & args :as e]]
+  "The GitLab condition of syntax tree `tree`."
+  [[kind & args :as tree]]
   (case kind
     :compare (let [[op left right] args
                    [[name-kind context] [value-kind value]] (if (= :name (first left)) [left right] [right left])]
                (if (and (= :name name-kind) (= :string value-kind))
                  (compare-value op context value)
-                 (unsupported "GitLab rules compare a Variable with a string only")))
+                 (gap-reason! "GitLab rules compare a Variable with a string only")))
     :and (into [:and] (map condition args))
     :or (into [:or] (map condition args))
     :not (negate (condition (first args)))
     :call (cond
             (= "startswith" (first args)) (starts-with (second args))
             (status-functions (first args))
-            (unsupported (str "`" (first args) "()` decides when the Job runs, which a GitLab rule says only"
+            (gap-reason! (str "`" (first args) "()` decides when the Job runs, which a GitLab rule says only"
                               " beside the whole condition (`" (first args) "() && ..`)"))
-            :else (unsupported (str "`" (first args) "()` has no GitLab rule")))
+            :else (gap-reason! (str "`" (first args) "()` has no GitLab rule")))
     :name (if-let [variable (name-variables (first args))]
             [:set variable]
-            (unsupported (str "`" (first args) "` has no GitLab Variable")))
-    (unsupported (str "`" (or (second e) (name kind)) "` is not a comparison GitLab rules can make"))))
+            (gap-reason! (str "`" (first args) "` has no GitLab Variable")))
+    (gap-reason! (str "`" (or (second tree) (name kind)) "` is not a comparison GitLab rules can make"))))
 
 (defn- status
-  "The rule `when` of one top-level `&&` operand `e` that is a status
+  "The rule `when` of one top-level `&&` operand `tree` that is a status
   function call (`!cancelled()` counts as `always()`): `[:status when]`,
-  or nil when `e` is no status function."
-  [e]
+  or nil when `tree` is no status function."
+  [tree]
   (let [cancelled [:call "cancelled" []]]
     (cond
-      (= [:not cancelled] e) [:status "always"]
-      (and (= :call (first e)) (contains? status-functions (second e)) (empty? (nth e 2)))
-      (let [rule-when (status-functions (second e))]
+      (= [:not cancelled] tree) [:status "always"]
+      (and (= :call (first tree)) (contains? status-functions (second tree)) (empty? (nth tree 2)))
+      (let [rule-when (status-functions (second tree))]
         (when (= ::cancelled rule-when)
-          (unsupported "GitLab rules cannot run a Job only when the Pipeline is cancelled"))
+          (gap-reason! "GitLab rules cannot run a Job only when the Pipeline is cancelled"))
         [:status rule-when]))))
 
 (defn- status-and-condition
-  "Syntax tree `e` as `{:condition c :when w}`: the GitLab condition of
+  "Syntax tree `tree` as `{:condition c :when w}`: the GitLab condition of
   everything but the status functions beside the whole condition, which
-  become the rule's `when`; either may be nil."
-  [e]
-  (let [operands (if (= :and (first e)) (rest e) [e])
+  become the rule's `when`; either may be nil. A literal `true` beside
+  it changes nothing, and a literal `false` beside it leaves the Job out
+  (`when: never`)."
+  [tree]
+  (let [operands (remove #{[:name "true"]} (if (= :and (first tree)) (rest tree) [tree]))
         {statuses true others false} (group-by (comp boolean status) operands)
         whens (into #{} (keep (comp second status)) statuses)]
-    (when (< 1 (count whens))
-      (unsupported "the condition has more than one status function"))
-    {:condition (case (count others)
-                  0 nil
-                  1 (condition (first others))
-                  (into [:and] (map condition others)))
-     :when (first whens)}))
+    (cond
+      (some #{[:name "false"]} operands) {:condition nil :when "never"}
+      (< 1 (count whens)) (gap-reason! "the condition has more than one status function")
+      :else {:condition (case (count others)
+                          0 nil
+                          1 (condition (first others))
+                          (into [:and] (map condition others)))
+             :when (first whens)})))
 
 (defn parse-if
   "GitHub `if:` expression `text` as `{:condition c :when w}`: `c` the
@@ -271,15 +293,23 @@
   for `false`, nil); or `{:gap reason}` when GitLab rules cannot say it."
   [text]
   (try
-    (let [e (parse text)]
-      (case e
-        [:name "true"] {:condition nil :when nil}
-        [:name "false"] {:condition nil :when "never"}
-        (status-and-condition e)))
-    (catch clojure.lang.ExceptionInfo e
-      (if-let [reason (::reason (ex-data e))]
+    (status-and-condition (parse text))
+    (catch clojure.lang.ExceptionInfo ex
+      (if-let [reason (::reason (ex-data ex))]
         {:gap reason}
-        (throw e)))))
+        (throw ex)))))
+
+(defn step-when
+  "What the `if:` `text` of a Step (nil when it has none) asks of it, when
+  it is only a status function: `{:when nil}` when it changes nothing
+  (none, `success()`), `{:when \"always\"}` or `{:when \"on_failure\"}`;
+  nil for any other `if:`, which GitLab cannot say of a Step."
+  [text]
+  (if (nil? text)
+    {:when nil}
+    (let [{:keys [gap] rule-if :condition rule-when :when} (parse-if text)]
+      (when (and (not gap) (nil? rule-if) (contains? #{nil "always" "on_failure"} rule-when))
+        {:when rule-when}))))
 
 (defn- render
   "GitLab condition `c` as rule text; `nested?` when it is an operand of
@@ -322,31 +352,33 @@
       (into [:and] operands))))
 
 (defn- settle-job
-  "Job `id`'s rules, given `settled` (Job id → `{:condition c :never? b}`,
-  what keeps each Job it needs out of the Pipeline): see `job-rules`."
+  "Job `id`'s rules, given `settled`, Job id → what was settled for each
+  Job it needs: see `job-rules`. `:condition` and `:never?` are what keeps
+  the Job out of the Pipeline, and `:unconverted` the Jobs (itself or
+  those it needs, transitively) whose `if:` has no GitLab rule."
   [workflow-path settled {:keys [id needs] :as job}]
   (let [{:keys [gap] own-when :when own :condition} (some-> (:if job) parse-if)
         always? (= "always" own-when)
-        excluding (fn [need] (let [{inherited-condition :condition :keys [never?]} (settled need)]
-                               (or inherited-condition never?)))
+        sometimes-left-out? (fn [need] (let [{need-condition :condition :keys [never?]} (settled need)]
+                                         (boolean (or need-condition never?))))
         inherited (when-not always? (map settled needs))
         never? (or (= "never" own-when) (some :never? inherited))
         combined (when-not never? (conjoin (cons own (map :condition inherited))))
         rule-when (cond never? "never" (#{"always" "on_failure"} own-when) own-when)
+        unconverted (into (sorted-set) (mapcat :unconverted) inherited)
         location {:workflow workflow-path :job id}]
     {:condition combined
      :never? never?
+     :unconverted (cond-> unconverted gap (conj id))
      :rules (some-> (if never? {:when "never"} (rule combined rule-when)) vector)
-     :optional-needs (when always? (filterv excluding needs))
+     :optional-needs (when always? (filterv sometimes-left-out? needs))
      :gaps (cond-> []
              gap (conj (gap/at location (str "its `if:` `" (:if job) "` has no GitLab rule (" gap
                                              "); the Job runs whenever the Pipeline does, so add its rules by hand.")))
-             (not always?)
-             (into (for [need needs
-                         :when (:gap? (settled need))]
-                     (gap/at location (str "needs Job `" need "`, whose `if:` has no GitLab rule; GitHub skips this Job"
-                                           " whenever it skips `" need "`, so add `" need "`'s condition to its rules by hand.")))))
-     :gap? (boolean gap)}))
+             true (into (for [other unconverted]
+                          (gap/at location (str "needs Job `" other "`, directly or through the Jobs it needs, and the `if:`"
+                                                " of `" other "` has no GitLab rule; GitHub skips this Job whenever it skips `"
+                                                other "`, so add `" other "`'s condition to its rules by hand.")))))}))
 
 (defn job-rules
   "The GitLab rules of the Jobs of the Workflow at `workflow-path`: `jobs`

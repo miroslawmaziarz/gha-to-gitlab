@@ -56,32 +56,18 @@
               :outcome (or outcome "converted")
               :gap-count (count gaps)}}))
 
-(defn- step-status
-  "The status a Step's `if:` asks for when it is only a status function:
-  `:success` when it changes nothing (no `if:`, or `success()`),
-  `\"always\"` or `\"on_failure\"`; nil for any other `if:`."
-  [step]
-  (if-some [text (:if step)]
-    (let [{:keys [gap condition] rule-when :when} (conditions/parse-if (str text))]
-      (when-not (or gap condition)
-        (case rule-when
-          nil :success
-          ("always" "on_failure") rule-when
-          nil)))
-    :success))
-
 (defn- keep-artifacts
-  "Translation `translation` with its Job artifacts kept `status`
-  (`always`, `on_failure`, see `step-status`), when it has any."
-  [status translation]
+  "Translation `translation` with its Job artifacts kept `rule-when`
+  (`always`, `on_failure`, see `conditions/step-when`), when it has any."
+  [rule-when translation]
   (cond-> translation
-    (and (string? status) (get-in translation [:job-settings :artifacts]))
-    (assoc-in [:job-settings :artifacts :when] status)))
+    (and rule-when (get-in translation [:job-settings :artifacts]))
+    (assoc-in [:job-settings :artifacts :when] rule-when)))
 
 (defn- step-if-gap
   "The Gap of a Step whose `if:` its conversion leaves out."
   [workflow-path job-id index step]
-  (gap/at {:workflow workflow-path :job job-id :step (step-label step index)}
+  (gap/at (dissoc (step-location workflow-path job-id step index) :action)
           (str "its `if:` `" (:if step) "` is left out; GitLab runs every script line of the Job,"
                " so guard the Step's lines by hand.")))
 
@@ -93,18 +79,18 @@
   inputs may reference. A Step's `if:` is a Gap, unless it only asks an
   upload to keep its artifacts `always()` or on `failure()` (#17)."
   [workflow-path job-id matrix-values index step]
-  (let [status (step-status step)
+  (let [{rule-when :when :as status} (conditions/step-when (some-> (:if step) str))
         converted (cond
                     (:run step) {:script [(variables/rewrite-references (:run step))]}
                     (:uses step) (let [location (step-location workflow-path job-id step index)]
                                    (if-let [translation (some->> (matrix/translate-action action-translator/translate
                                                                                           step matrix-values)
-                                                                 (keep-artifacts status))]
+                                                                 (keep-artifacts rule-when))]
                                      (translated-action location translation)
                                      (unknown-action location)))
                     :else (throw (ex-info (str "Job '" job-id "' has a Step with neither run: nor uses:")
                                           {:job job-id :step step})))
-        kept? (or (= :success status) (and status (get-in converted [:job-settings :artifacts :when])))]
+        kept? (and status (or (nil? rule-when) (get-in converted [:job-settings :artifacts :when])))]
     (cond-> converted
       (not kept?) (update :gaps (fnil conj []) (step-if-gap workflow-path job-id index step)))))
 
@@ -175,7 +161,8 @@
     (update lifted :gaps #(-> (:gaps own) (into (mapcat :gaps) steps) (into %)))))
 
 (defn- convert-job
-  "Converts one Job into `{:job .. :gaps [..]}`. `job-ids` are the ids of
+  "Converts one Job into `{:job .. :condition .. :gaps [..]}`, `:condition`
+  being what `conditions/job-rules` takes for it. `job-ids` are the ids of
   every Job in the Workflow; a `needs:` entry naming any other Job is a Gap
   and is left out of the Job's `:needs`."
   [workflow-path workflow-variables job-ids [job-id job]]
@@ -191,7 +178,9 @@
         {:keys [steps settings]} (->> (:steps job)
                                       (map-indexed #(convert-step workflow-path id matrix-values %1 %2))
                                       (settle-job-settings all-env-variables))]
-    {:job (cond-> {:id id :workflow workflow-path}
+    {:condition (cond-> {:id id :needs needs}
+                  (some? (:if job)) (assoc :if (str (:if job))))
+     :job (cond-> {:id id :workflow workflow-path}
             (and runs-on (nil? runs-on-gap)) (assoc :runs-on runs-on)
             (seq needs) (assoc :needs needs)
             matrix (assoc :matrix matrix)
@@ -309,11 +298,7 @@
          {workflow-variables :variables workflow-gaps :gaps} (env-variables {:workflow workflow-path} (:env workflow))
          {:keys [rules] trigger-gaps :gaps} (triggers/workflow-rules workflow-path (:on workflow))
          jobs (mapv #(convert-job workflow-path workflow-variables job-ids %) (:jobs workflow))
-         job-rules (conditions/job-rules workflow-path
-                                         (map (fn [{:keys [job]} [_ source-job]]
-                                                (cond-> (select-keys job [:id :needs])
-                                                  (some? (:if source-job)) (assoc :if (str (:if source-job)))))
-                                              jobs (:jobs workflow)))]
+         job-rules (conditions/job-rules workflow-path (map :condition jobs))]
      (ci-model/validate!
       (cond-> {:jobs (mapv #(with-rules % (get job-rules (:id %))) (map :job jobs))
                :gaps (-> trigger-gaps

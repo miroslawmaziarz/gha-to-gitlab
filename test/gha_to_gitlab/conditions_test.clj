@@ -11,28 +11,32 @@
     (are [expression rule] (= rule (conditions/condition-rule expression))
       "github.ref == 'refs/heads/main'" {:if "$CI_COMMIT_BRANCH == \"main\""}
       "${{ github.ref != 'refs/tags/v1' }}" {:if "$CI_COMMIT_TAG != \"v1\""}
-      "'main' == github.ref_name" {:if "$CI_COMMIT_REF_NAME == \"main\""}
+      "'main' == github.ref_name" {:if "$CI_COMMIT_BRANCH == \"main\" || $CI_COMMIT_TAG == \"main\""}
       "github.event_name == 'pull_request'" {:if "$CI_PIPELINE_SOURCE == \"merge_request_event\""}
       "github.event_name != 'workflow_dispatch'" {:if "$CI_PIPELINE_SOURCE != \"web\""}
       "github.head_ref == 'feature'" {:if "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == \"feature\""}
       "github.base_ref == 'main'" {:if "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == \"main\""}
       "github.ref_type == 'tag'" {:if "$CI_COMMIT_TAG"}
       "github.ref_type != 'tag'" {:if "$CI_COMMIT_TAG == null"}
-      "github.ref_type == 'branch'" {:if "$CI_COMMIT_BRANCH"})))
+      "github.ref_type == 'branch'" {:if "$CI_COMMIT_TAG == null"}
+      "github.ref_type != 'branch'" {:if "$CI_COMMIT_TAG"})))
 
 (deftest combination-test
   (testing "&& and || combine conditions, with parentheses where GitLab needs them"
     (are [expression rule] (= rule (conditions/condition-rule expression))
       "github.event_name == 'push' && github.ref == 'refs/heads/main'"
       {:if "$CI_PIPELINE_SOURCE == \"push\" && $CI_COMMIT_BRANCH == \"main\""}
-      "github.ref_name == 'main' || github.ref_name == 'dev'"
-      {:if "$CI_COMMIT_REF_NAME == \"main\" || $CI_COMMIT_REF_NAME == \"dev\""}
+      "github.head_ref == 'a' || github.head_ref == 'b'"
+      {:if "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == \"a\" || $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == \"b\""}
       "github.event_name == 'push' && (github.ref_name == 'main' || github.ref_type == 'tag')"
-      {:if "$CI_PIPELINE_SOURCE == \"push\" && ($CI_COMMIT_REF_NAME == \"main\" || $CI_COMMIT_TAG)"}))
+      {:if (str "$CI_PIPELINE_SOURCE == \"push\""
+                " && ($CI_COMMIT_BRANCH == \"main\" || $CI_COMMIT_TAG == \"main\" || $CI_COMMIT_TAG)")}
+      "true && github.ref == 'refs/heads/main'" {:if "$CI_COMMIT_BRANCH == \"main\""}
+      "false && github.ref == 'refs/heads/main'" {:when "never"}))
   (testing "GitLab rules have no `!`, so a negation turns its comparisons around"
     (are [expression rule] (= rule (conditions/condition-rule expression))
       "!(github.ref_name == 'main' || github.event_name == 'schedule')"
-      {:if "$CI_COMMIT_REF_NAME != \"main\" && $CI_PIPELINE_SOURCE != \"schedule\""}
+      {:if "$CI_COMMIT_BRANCH != \"main\" && $CI_COMMIT_TAG != \"main\" && $CI_PIPELINE_SOURCE != \"schedule\""}
       "!(github.ref_type == 'tag')" {:if "$CI_COMMIT_TAG == null"}))
   (testing "a branch name alone is true when it is set"
     (are [expression rule] (= rule (conditions/condition-rule expression))
@@ -40,22 +44,22 @@
       "!github.head_ref" {:if "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == null"})))
 
 (deftest starts-with-test
-  (testing "startsWith on a ref or branch name becomes an anchored regex, or a set tag or branch"
+  (testing "startsWith on a ref or branch name becomes an anchored regex ignoring case, as GitHub does, or a set tag or branch"
     (are [expression rule] (= rule (conditions/condition-rule expression))
       "startsWith(github.ref, 'refs/tags/')" {:if "$CI_COMMIT_TAG"}
-      "startsWith(github.ref, 'refs/tags/v1.')" {:if "$CI_COMMIT_TAG =~ /^v1\\./"}
-      "startsWith(github.ref, 'refs/heads/release/')" {:if "$CI_COMMIT_BRANCH =~ /^release\\//"}
-      "!startsWith(github.ref_name, 'wip-')" {:if "$CI_COMMIT_REF_NAME !~ /^wip-/"}
-      "StartsWith(github.head_ref, 'dependabot/')" {:if "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^dependabot\\//"})))
+      "startsWith(github.ref, 'refs/tags/v1.')" {:if "$CI_COMMIT_TAG =~ /^v1\\./i"}
+      "startsWith(github.ref, 'refs/heads/release/')" {:if "$CI_COMMIT_BRANCH =~ /^release\\//i"}
+      "!startsWith(github.ref_name, 'wip-')" {:if "$CI_COMMIT_BRANCH !~ /^wip-/i && $CI_COMMIT_TAG !~ /^wip-/i"}
+      "StartsWith(github.head_ref, 'dependabot/')" {:if "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^dependabot\\//i"})))
 
 (deftest status-test
   (testing "a status function beside the whole condition becomes the rule's `when`"
     (are [expression rule] (= rule (conditions/condition-rule expression))
       "always()" {:when "always"}
-      "${{ always() && github.ref_name == 'main' }}" {:if "$CI_COMMIT_REF_NAME == \"main\"" :when "always"}
+      "${{ always() && github.head_ref == 'main' }}" {:if "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == \"main\"" :when "always"}
       "failure()" {:when "on_failure"}
-      "github.ref_name == 'main' && failure()" {:if "$CI_COMMIT_REF_NAME == \"main\"" :when "on_failure"}
-      "success() && github.ref_name == 'main'" {:if "$CI_COMMIT_REF_NAME == \"main\""}
+      "github.head_ref == 'main' && failure()" {:if "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == \"main\"" :when "on_failure"}
+      "success() && github.head_ref == 'main'" {:if "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == \"main\""}
       "success()" {}
       "!cancelled()" {:when "always"})))
 
@@ -93,7 +97,7 @@
                      "rules" [{"if" "$CI_PIPELINE_SOURCE == \"push\""}]
                      "script" ["make"]}
             "deploy" {"stage" "stage-2"
-                      "rules" [{"if" "$CI_COMMIT_REF_NAME == \"main\" && $CI_PIPELINE_SOURCE == \"push\""}]
+                      "rules" [{"if" "($CI_COMMIT_BRANCH == \"main\" || $CI_COMMIT_TAG == \"main\") && $CI_PIPELINE_SOURCE == \"push\""}]
                       "needs" ["build"]
                       "script" ["make deploy"]}
             "notify" {"stage" "stage-3"
@@ -111,10 +115,13 @@
   (testing "a Job if: GitLab rules cannot say is a Gap quoting it; the Job runs, and so do the Jobs that need it"
     (is (= [(str prefix "Job `a`: its `if:` `contains(github.event.head_commit.message, 'go')` has no GitLab rule"
                  " (`contains()` has no GitLab rule); the Job runs whenever the Pipeline does, so add its rules by hand.")
-            (str prefix "Job `b`: needs Job `a`, whose `if:` has no GitLab rule; GitHub skips this Job whenever it skips `a`,"
-                 " so add `a`'s condition to its rules by hand.")]
+            (str prefix "Job `b`: needs Job `a`, directly or through the Jobs it needs, and the `if:` of `a` has no GitLab"
+                 " rule; GitHub skips this Job whenever it skips `a`, so add `a`'s condition to its rules by hand.")
+            (str prefix "Job `c`: needs Job `a`, directly or through the Jobs it needs, and the `if:` of `a` has no GitLab"
+                 " rule; GitHub skips this Job whenever it skips `a`, so add `a`'s condition to its rules by hand.")]
            (gap-messages (str "  a:\n    if: contains(github.event.head_commit.message, 'go')\n    steps:\n      - run: make\n"
-                              "  b:\n    needs: a\n    steps:\n      - run: make b\n"))))))
+                              "  b:\n    needs: a\n    steps:\n      - run: make b\n"
+                              "  c:\n    needs: b\n    steps:\n      - run: make c\n"))))))
 
 (deftest step-condition-test
   (testing "an upload-artifact Step that runs always() or on failure() keeps its artifacts then"

@@ -87,7 +87,7 @@
 
 (def JobRule
   "A Job's GitLab rule (ADR-0010): the Job is in a Pipeline whose
-  variables match `:if` (missing: every Pipeline), and runs `:when` it
+  Variables match `:if` (missing: every Pipeline), and runs `:when` it
   says (missing: when the Jobs before it succeeded; `never`: not at
   all)."
   [:and
