@@ -20,7 +20,7 @@ Repositories, issues and pull requests are out of scope; GitLab's built-in GitHu
 | `runs-on` | the Job's `image` and runner `tags` (Runner Mapping) |
 | `on: push`, `pull_request` (with `branches`, `tags`, `-ignore` filters) | `workflow: rules` on the Pipeline source and branch/tag regexes (ADR-0008) |
 | `on: schedule`, `workflow_dispatch` | a rule for scheduled and Run pipeline Pipelines, plus a Gap: create the Pipeline Schedule by hand |
-| path filters, other events | a Gap |
+| path filters, other Triggers | a Gap |
 | Workflow / Job `env:` | Pipeline / Job `variables` |
 | Step `env:` | Job `variables`, when every Step agrees on the value or the Job already has it; a Gap otherwise (ADR-0007) |
 | `${{ env.X }}`, `${{ secrets.X }}` in commands and `env:` | `${X}`, plus one Gap per Secret to create it as a masked Variable |
@@ -190,7 +190,7 @@ Conversion always goes Source → CI Model → Target (ADR-0001). The code still
 - `gha-to-gitlab.action-translators`: requires every Action Translator; adding one means a new namespace under `action-translators/` plus one require here
 - `gha-to-gitlab.runner-mapping`: applies Runner Mappings to the CI Model's Jobs
 - `gha-to-gitlab.action-job-settings`: Action Job settings (image, cache, artifacts, Variables): settles them per Job (the earliest Action wins, GitLab limits, conflict Gaps) and applies them after the Runner Mapping (ADR-0002)
-- `gha-to-gitlab.triggers`: `on:` as GitLab workflow rules (glob → regex, filter order) and Trigger Gaps
+- `gha-to-gitlab.triggers`: Triggers as GitLab workflow rules (glob → regex, filter order) and Trigger Gaps
 - `gha-to-gitlab.variables`: `env:` as Variables (lifting a Step's into its Job), `${{ env.X }}`/`${{ secrets.X }}` rewriting and Secret Gaps
 - `gha-to-gitlab.config`: reads and validates the optional Migration Config
 - `gha-to-gitlab.gitlab`: writes the CI Model as `.gitlab-ci.yml`

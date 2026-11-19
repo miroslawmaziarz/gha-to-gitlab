@@ -22,7 +22,9 @@
     (are [glob reason] (= {:gap reason} (triggers/glob->regex glob))
       "+main" "`+` repeats nothing"
       "**?" "`?` follows a wildcard"
-      "[abc" "`[` has no closing `]`")))
+      "[abc" "`[` has no closing `]`"
+      "[^a]x" "`[^` may negate the class on GitHub"
+      "a[/-]b" "`[..]` holds `/`")))
 
 (defn- convert-workflow [on-yaml]
   (migration/convert {:workflows {".github/workflows/ci.yml"
@@ -54,6 +56,13 @@
   (testing "pull_request branch filters match the merge request's target branch"
     (is (= [{"if" (str merge-request " && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^main$/")}]
            (workflow-rules "on:\n  pull_request:\n    branches: [main]\n"))))
+  (testing "one pattern written alone is a list of that pattern"
+    (is (= [{"if" (str push " && $CI_COMMIT_BRANCH =~ /^main$/")}]
+           (workflow-rules "on:\n  push:\n    branches: main\n"))))
+  (testing "patterns are the text GitHub reads, not YAML 1.1's booleans and dates"
+    (is (= [{"if" (str push " && $CI_COMMIT_BRANCH =~ /^2020-01-01$/")}
+            {"if" (str push " && $CI_COMMIT_BRANCH =~ /^yes$/")}]
+           (workflow-rules "on:\n  push:\n    branches: [yes, 2020-01-01]\n"))))
   (testing "workflow: comes first in the CI file"
     (is (str/starts-with? (:gitlab-ci-yaml (convert-workflow "on: push\nenv:\n  A: x\n")) "workflow:"))))
 
@@ -84,6 +93,14 @@
              (mapv #(select-keys % [:trigger :message]) (:gaps model)))))
     (testing "the Migration Report lists them"
       (is (str/includes? report "Trigger `release`")))))
+
+(deftest schedule-without-cron-test
+  (testing "a schedule that lists no cron still gets its rule, and a Gap"
+    (doseq [on-yaml ["on:\n  schedule:\n" "on:\n  schedule:\n    cron: '0 1 * * *'\n"]]
+      (is (= [{:trigger "schedule"
+               :message "Workflow `.github/workflows/ci.yml`: Trigger `schedule` lists no `cron`; create the Pipeline Schedules it means on the Target by hand."}]
+             (mapv #(select-keys % [:trigger :message]) (:gaps (:model (convert-workflow on-yaml))))))
+      (is (= [{"if" "$CI_PIPELINE_SOURCE == \"schedule\""}] (workflow-rules on-yaml))))))
 
 (deftest no-convertible-trigger-test
   (testing "when no Trigger becomes a rule, no Pipeline starts on its own, instead of every one"

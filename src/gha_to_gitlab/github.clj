@@ -188,6 +188,12 @@
     (nil? value) ""
     :else (variables/plain-scalar-text (subs source (:index start) (:index end)))))
 
+(defn- key-text
+  "A marked map key as text as written, even one YAML 1.1 reads otherwise
+  (`YES`, `on`)."
+  [source {k :unmark :keys [start end]}]
+  (if (string? k) k (subs source (:index start) (:index end))))
+
 (defn- source-env
   "The `env:` read from `marked` (a map read with `:mark`): a map of name
   → the text GitHub reads, or the `env:` value itself when it is not a map;
@@ -195,20 +201,32 @@
   [source marked]
   (when-let [env (marked-get marked "env")]
     (if (map? (:unmark env))
-      ;; a name is text as written, even one YAML 1.1 reads otherwise (`YES`)
-      (into {}
-            (map (fn [[{k :unmark :keys [start end]} v]]
-                   [(keyword (if (string? k) k (subs source (:index start) (:index end))))
-                    (env-text source v)]))
-            (:unmark env))
+      (into {} (map (fn [[k v]] [(keyword (key-text source k)) (env-text source v)])) (:unmark env))
       (:unmark env))))
+
+(defn- source-value
+  "Marked value `marked` as GitHub reads it: maps (in Source order) with
+  keys as written, lists as vectors, and scalars as text (see `env-text`)."
+  [source {value :unmark :as marked}]
+  (cond
+    (map? value) (into (empty value) (map (fn [[k v]] [(keyword (key-text source k)) (source-value source v)])) value)
+    (sequential? value) (mapv #(source-value source %) value)
+    :else (env-text source marked)))
+
+(defn- source-on
+  "The Triggers (`on:`) read from the marked Workflow `marked` as GitHub
+  reads them (see `source-value`); YAML 1.1 reads the key `on` as true."
+  [source marked]
+  (when-let [on (or (marked-get marked "on") (marked-get marked true))]
+    (source-value source on)))
 
 (defn- read-workflow
   "The Workflow in YAML text `source`, with every `env:` (Workflow, Job,
-  Step) holding the texts GitHub reads (see `source-env`)."
+  Step) and the Triggers (`:on`) holding the texts GitHub reads (see
+  `source-env`, `source-on`)."
   [source]
-  (let [workflow (yaml/parse-string source)
-        marked (yaml/parse-string source :mark true)
+  (let [marked (yaml/parse-string source :mark true)
+        workflow (-> (yaml/parse-string source) (dissoc true) (assoc :on (source-on source marked)))
         with-env (fn [m marked] (cond-> m (marked-get marked "env") (assoc :env (source-env source marked))))]
     (cond-> (with-env workflow marked)
       (map? (:jobs workflow))
@@ -231,8 +249,7 @@
    (let [workflow (read-workflow workflow-yaml)
          job-ids (into #{} (map (comp name key)) (:jobs workflow))
          {workflow-variables :variables workflow-gaps :gaps} (env-variables {:workflow workflow-path} (:env workflow))
-         ;; YAML 1.1 reads the key `on` as true
-         {:keys [rules] trigger-gaps :gaps} (triggers/workflow-rules workflow-path (get workflow true (:on workflow)))
+         {:keys [rules] trigger-gaps :gaps} (triggers/workflow-rules workflow-path (:on workflow))
          jobs (mapv #(convert-job workflow-path workflow-variables job-ids %) (:jobs workflow))]
      (ci-model/validate!
       (cond-> {:jobs (mapv :job jobs)
