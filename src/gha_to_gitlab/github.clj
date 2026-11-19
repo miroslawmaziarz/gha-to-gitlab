@@ -7,6 +7,7 @@
             [gha-to-gitlab.action-translators]
             [gha-to-gitlab.ci-model :as ci-model]
             [gha-to-gitlab.gap :as gap]
+            [gha-to-gitlab.matrix :as matrix]
             [gha-to-gitlab.triggers :as triggers]
             [gha-to-gitlab.variables :as variables]
             [gha-to-gitlab.wording :as wording]))
@@ -57,12 +58,14 @@
 (defn- convert-step
   "Converts one Step into `{:script [line ...] :gaps [gap ...]}`; `:gaps`
   lists what could not be converted faithfully, and `:action` records an
-  Action that an Action Translator converted."
-  [workflow-path job-id index step]
+  Action that an Action Translator converted. `matrix-values` are the
+  Job's Matrix values (see `matrix/job-matrix`), which an Action's
+  inputs may reference."
+  [workflow-path job-id matrix-values index step]
   (cond
     (:run step) {:script [(variables/rewrite-references (:run step))]}
     (:uses step) (let [location (step-location workflow-path job-id step index)]
-                   (if-let [translation (action-translator/translate step)]
+                   (if-let [translation (matrix/translate-action action-translator/translate step matrix-values)]
                      (translated-action location translation)
                      (unknown-action location)))
     :else (throw (ex-info (str "Job '" job-id "' has a Step with neither run: nor uses:")
@@ -140,21 +143,29 @@
   and is left out of the Job's `:needs`."
   [workflow-path workflow-variables job-ids [job-id job]]
   (let [id (name job-id)
+        location {:workflow workflow-path :job id}
         job-variables (variables-of-job workflow-path workflow-variables id job)
         {needs true missing false} (group-by (comp boolean job-ids)
                                              (some-> (:needs job) job-needs))
+        all-env-variables (merge workflow-variables (:variables job-variables))
+        {:keys [matrix] matrix-values :values matrix-gaps :gaps} (matrix/job-matrix location (:strategy job))
+        runs-on (some-> (:runs-on job) runner-label)
+        runs-on-gap (matrix/runs-on-gap location runs-on matrix-values)
         {:keys [steps settings]} (->> (:steps job)
-                                      (map-indexed #(convert-step workflow-path id %1 %2))
-                                      (settle-job-settings
-                                       (merge workflow-variables (:variables job-variables))))]
+                                      (map-indexed #(convert-step workflow-path id matrix-values %1 %2))
+                                      (settle-job-settings all-env-variables))]
     {:job (cond-> {:id id :workflow workflow-path}
-            (some? (:runs-on job)) (assoc :runs-on (runner-label (:runs-on job)))
+            (and runs-on (nil? runs-on-gap)) (assoc :runs-on runs-on)
             (seq needs) (assoc :needs needs)
+            matrix (assoc :matrix matrix)
             (seq (:variables job-variables)) (assoc :variables (:variables job-variables))
             true (assoc :script (job-script steps))
             (some :action steps) (assoc :actions (into [] (keep :action) steps))
             (seq settings) (assoc :action-job-settings settings))
      :gaps (-> (mapv #(missing-job-gap workflow-path id %) missing)
+               (into matrix-gaps)
+               (cond-> runs-on-gap (conj runs-on-gap))
+               (into (matrix/variable-clash-gaps location matrix all-env-variables))
                (into (:gaps job-variables))
                (into (mapcat :gaps) steps))}))
 
@@ -236,6 +247,8 @@
                               (for [[job-id job] jobs
                                     :let [marked-job (marked-get marked-jobs (name job-id))]]
                                 [job-id (cond-> (with-env job marked-job)
+                                          (marked-get marked-job "strategy")
+                                          (assoc :strategy (source-value source (marked-get marked-job "strategy")))
                                           (sequential? (:steps job))
                                           (update :steps #(mapv with-env % (:unmark (marked-get marked-job "steps")))))]))))))))
 

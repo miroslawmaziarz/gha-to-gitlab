@@ -94,7 +94,11 @@
                          "env:\n  AUTH: Bearer ${{ secrets.API_TOKEN }}\n"
                          "jobs:\n  build:\n"
                          "    env:\n      OUT: dist-${{ env.MODE }}\n"
-                         "    steps:\n      - run: echo ${{ env.MODE }}_x ${{secrets.NPM_TOKEN}} ${{ github.sha }}\n"))))))
+                         "    steps:\n      - run: echo ${{ env.MODE }}_x ${{secrets.NPM_TOKEN}} ${{ github.sha }}\n")))))
+  (testing "an env name with `-` is no GitLab Variable, so its reference stays an expression"
+    (is (= ["echo ${{ env.A-B }}"]
+           (get-in (ci-file "on: push\njobs:\n  build:\n    steps:\n      - run: echo ${{ env.A-B }}\n")
+                   ["build" "script"])))))
 
 (deftest secret-gaps-test
   (let [{:keys [model report]}

@@ -58,11 +58,13 @@
 
 (defn exact-version
   "`version` as an image tag when it names one version: `20`, `20.11.1`, or
-  `20.x`/`3.12.x` (the latest of that line, which the image tag also means);
-  nil otherwise (ranges, expressions, lists)."
+  `20.x`/`3.12.x` (the latest of that line, which the image tag also means),
+  or a whole Variable reference `${X}` (`translate-setup` lets only a
+  Matrix Variable's through); nil otherwise (ranges, expressions, lists)."
   [version]
   (let [v (str/trim (str version))]
     (or (re-matches #"\d+(?:\.\d+){0,2}" v)
+        (re-matches (re-pattern (str "\\$\\{[" ci-model/variable-name-chars "]+\\}")) v)
         (second (re-matches #"(\d+(?:\.\d+)?)\.x" v)))))
 
 (def ^:private by-hand-cache-hint
@@ -114,8 +116,11 @@
     :inputs          per-input `{:honoured :hint}` beyond `common-inputs`
     :caches          per package manager the `cache` input names, the
                      Job cache that replaces it (see `package-cache`)
-    :example         an example image for Gap hints"
-  [{:keys [with]} {:keys [version-input version-file image default-image default-note inputs example] :as spec}]
+    :example         an example image for Gap hints
+
+  The Step's `:matrix-variables` are the Matrix Variable references its
+  inputs may hold (see `matrix/translate-action`)."
+  [{:keys [with matrix-variables]} {:keys [version-input version-file image default-image default-note inputs example] :as spec}]
   (let [with (update-keys with name)
         version (get with version-input)
         file (get with version-file)
@@ -123,6 +128,11 @@
         {image-name :image image-gaps :gaps}
         (cond
           (and (number? version) (not (integer? version))) {:gaps [(unquoted-number-gap spec version)]}
+          ;; `${X}` the Source wrote is text GitHub never expands; only a
+          ;; Matrix Variable's reference (`matrix/translate-action`) is one
+          (and (string? version) (str/includes? version "${")
+               (not (contains? matrix-variables (str/trim version))))
+          {:gaps [(version-gap spec version)]}
           (some? version) (image spec with version)
           file {:gaps [(inputs/input-gap version-file file
                                          (str "read the version from that file and " (set-image-by-hand example)))]}

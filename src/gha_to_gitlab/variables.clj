@@ -5,24 +5,54 @@
   Step's `env:` entry is lifted into its Job only when that changes no
   Step's value, and is a Gap otherwise."
   (:require [clojure.string :as str]
+            [gha-to-gitlab.ci-model :as ci-model]
             [gha-to-gitlab.gap :as gap]
             [gha-to-gitlab.wording :as wording])
   (:import (java.math BigDecimal BigInteger)))
 
 (def ^:private reference
-  "A whole `${{ env.X }}` or `${{ secrets.X }}` expression; group 1 is the
-  context, group 2 the name."
-  #"\$\{\{\s*(env|secrets)\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+  "A whole `${{ env.X }}`, `${{ secrets.X }}` or `${{ matrix.x }}`
+  expression (see `reference-parts`); only Matrix keys may have `-`, as
+  `variable-name` turns it into `_`, while an `env:` or Secret name with
+  `-` names no GitLab Variable."
+  #"\$\{\{\s*(?:(env|secrets)\.([A-Za-z_][A-Za-z0-9_]*)|(matrix)\.([A-Za-z_][A-Za-z0-9_-]*))\s*\}\}")
 
-(defn- variable-reference [[_ _ n]]
-  (str "${" n "}"))
+(defn- reference-parts
+  "A `reference` match as `[context name]`, nil for a match of anything
+  else."
+  [[_ context n matrix-context matrix-key]]
+  (cond
+    context [context n]
+    matrix-context [matrix-context matrix-key]))
+
+(defn variable-name
+  "Name `n` (an `env:` name or a Matrix key) as a GitLab Variable name,
+  which allows only `ci-model/variable-name-chars`: every other character
+  becomes `_` (`node-version` → `node_version`)."
+  [n]
+  (str/replace n (re-pattern (str "[^" ci-model/variable-name-chars "]")) "_"))
+
+(defn- variable-reference [match]
+  (str "${" (variable-name (second (reference-parts match))) "}"))
 
 (defn rewrite-references
-  "`s` with every `${{ env.X }}` and `${{ secrets.X }}` as the Variable
-  reference `${X}`, which the shell expands in script lines; other
-  expressions are left as they are."
+  "`s` with every `${{ env.X }}`, `${{ secrets.X }}` and `${{ matrix.x }}`
+  as the Variable reference `${X}` (see `variable-name`), which the shell
+  expands in script lines; other expressions are left as they are."
   [s]
   (str/replace s reference variable-reference))
+
+(defn- referenced-names
+  "The names `s` references in `context` (\"secrets\", \"matrix\"), each
+  once, in order."
+  [context s]
+  (into [] (comp (map reference-parts) (filter #(= context (first %))) (map second) (distinct))
+        (re-seq reference (str s))))
+
+(defn matrix-keys
+  "The Matrix keys `s` references (`${{ matrix.x }}`), each once, in order."
+  [s]
+  (referenced-names "matrix" s))
 
 (def ^:private reference-or-dollar
   (re-pattern (str reference "|\\$")))
@@ -32,7 +62,7 @@
   `rewrite-references`, and every other `$` escaped as `$$`, since GitLab
   expands Variables in Variable values and GitHub does not."
   [s]
-  (str/replace s reference-or-dollar #(if (second %) (variable-reference %) "$$")))
+  (str/replace s reference-or-dollar #(if (reference-parts %) (variable-reference %) "$$")))
 
 (defn plain-scalar-text
   "The text GitHub reads from an unquoted YAML scalar written as `raw`,
@@ -117,7 +147,7 @@
 (defn- secret-names
   "The names of the Secrets `s` references (`${{ secrets.X }}`), in order."
   [s]
-  (into [] (comp (filter #(= "secrets" (second %))) (map #(nth % 2))) (re-seq reference (str s))))
+  (referenced-names "secrets" s))
 
 (defn- users-text
   "Where a Secret is used, from `users` (`{:job id}`, or `{}` for the

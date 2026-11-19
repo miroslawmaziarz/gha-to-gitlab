@@ -46,12 +46,13 @@
 
 (defn- gitlab-job
   "One GitLab Job, its keys in reading order: when it runs (stage, needs),
-  where it runs (image, tags), its environment (variables), what it
+  how many times (parallel matrix), where it runs (image, tags), its environment (variables), what it
   restores (cache), what it runs (script), then what it keeps (artifacts)."
-  [stage {:keys [needs image tags variables script cache artifacts]}]
+  [stage {:keys [needs matrix image tags variables script cache artifacts]}]
   (cond-> (ordered-map)
     stage (assoc :stage stage)
     (seq needs) (assoc :needs (mapv job-name needs))
+    matrix (assoc :parallel {:matrix matrix})
     image (assoc :image image)
     (seq tags) (assoc :tags tags)
     (seq variables) (assoc :variables (into (ordered-map) (sort variables)))
