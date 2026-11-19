@@ -1,0 +1,13 @@
+# A Matrix becomes a GitLab parallel matrix, checked value by value
+
+A Job's Matrix (`strategy.matrix`) becomes its `parallel: matrix` on the CI Model (`:matrix`, GitLab's shape, like ADR-0004's Job settings): one entry, one Variable per dimension, with the same values, so GitLab runs the same combinations. Values are the text GitHub reads (YAML 1.2, as ADR-0007 reads `env:`), so `20.10` is `20.1` on both platforms. GitLab Variable names allow only letters, digits and `_`, so a key becomes its Variable name with every other character as `_` (`node-version` → `node_version`); two keys with the same Variable name, and a Matrix Variable with an `env:` Variable's name, are Gaps.
+
+`${{ matrix.x }}` becomes `${x}` wherever `env`/`secrets` references are rewritten (commands, `env:` values), and also in Action inputs, but there only for the Job's own Matrix keys. An Action Translator then sees `${node_version}` and can carry it into a Job setting (`image: node:${node_version}`, which GitLab expands per matrix Job). The tag a translator derives is not always the value itself (`lts/*` → `node:lts`, `18.x` → `node:18`), so the Source reader also translates the Step once per value and compares: the first value whose Job settings differ from the Variable form is a Gap at the Step, naming the input.
+
+What a parallel matrix cannot say is a Gap at the Job: `include` and `exclude`, `fail-fast` unless it is `false` (GitLab never cancels the other runs, so only `false` matches), `max-parallel`, a Matrix or dimension given as an expression or as non-text values, and more than 200 combinations. `runs-on: ${{ matrix.os }}` is a Gap naming the values, and the Job gets no Runner Mapping, as one GitLab Job has one image and set of tags.
+
+## Considered Options
+
+- **`include`/`exclude` as several parallel matrix entries** (GitLab takes a list of maps, each crossed on its own, so the remaining combinations can be listed): deferred; the ticket asks for Gaps, and the expansion needs care with partial includes that extend existing combinations.
+- **A `MATRIX_` prefix on Variable names**: rejected; it never clashes with `env:`, but reads less like the Source. A clash is a Gap instead.
+- **Per-value images and tags for `runs-on`** (Runner Mapping per value, as extra matrix Variables): deferred to its own ticket.

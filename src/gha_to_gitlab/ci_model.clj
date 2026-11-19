@@ -59,6 +59,11 @@
   "Variables, name → value."
   [:map-of [:string {:min 1}] :string])
 
+(def Matrix
+  "A GitLab parallel matrix: the Job runs once per combination of each
+  entry's Variable values (ADR-0009)."
+  [:vector {:min 1} [:map-of [:re #"^[A-Za-z0-9_]+$"] [:vector {:min 1} :string]]])
+
 (def Job
   "One Job: its id, the Jobs it needs, where it runs (runner label, image,
   tags), its settings and script lines, and the Actions it converted."
@@ -69,6 +74,8 @@
    [:runs-on {:optional true} :string]
    ;; ids of the Jobs this Job runs after, in Source order
    [:needs {:optional true} [:vector {:min 1} [:string {:min 1}]]]
+   ;; the Job's Matrix: it runs once per combination
+   [:matrix {:optional true} Matrix]
    [:image {:optional true} [:string {:min 1}]]
    ;; the Runner Mapping's image, kept when an Action's image overrides it
    [:runner-mapping-image {:optional true} [:string {:min 1}]]

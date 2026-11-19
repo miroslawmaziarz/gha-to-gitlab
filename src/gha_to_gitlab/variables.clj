@@ -10,19 +10,31 @@
   (:import (java.math BigDecimal BigInteger)))
 
 (def ^:private reference
-  "A whole `${{ env.X }}` or `${{ secrets.X }}` expression; group 1 is the
-  context, group 2 the name."
-  #"\$\{\{\s*(env|secrets)\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+  "A whole `${{ env.X }}`, `${{ secrets.X }}` or `${{ matrix.x }}`
+  expression; group 1 is the context, group 2 the name."
+  #"\$\{\{\s*(env|secrets|matrix)\.([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}")
+
+(defn variable-name
+  "Name `n` (an `env:` name or a Matrix key) as a GitLab Variable name,
+  which allows only letters, digits and `_`: every other character becomes
+  `_` (`node-version` → `node_version`)."
+  [n]
+  (str/replace n #"[^A-Za-z0-9_]" "_"))
 
 (defn- variable-reference [[_ _ n]]
-  (str "${" n "}"))
+  (str "${" (variable-name n) "}"))
 
 (defn rewrite-references
-  "`s` with every `${{ env.X }}` and `${{ secrets.X }}` as the Variable
-  reference `${X}`, which the shell expands in script lines; other
-  expressions are left as they are."
+  "`s` with every `${{ env.X }}`, `${{ secrets.X }}` and `${{ matrix.x }}`
+  as the Variable reference `${X}` (see `variable-name`), which the shell
+  expands in script lines; other expressions are left as they are."
   [s]
   (str/replace s reference variable-reference))
+
+(defn matrix-keys
+  "The Matrix keys `s` references (`${{ matrix.x }}`), each once, in order."
+  [s]
+  (into [] (comp (filter #(= "matrix" (second %))) (map #(nth % 2)) (distinct)) (re-seq reference (str s))))
 
 (def ^:private reference-or-dollar
   (re-pattern (str reference "|\\$")))

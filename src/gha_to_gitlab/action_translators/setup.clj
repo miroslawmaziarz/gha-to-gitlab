@@ -58,11 +58,14 @@
 
 (defn exact-version
   "`version` as an image tag when it names one version: `20`, `20.11.1`, or
-  `20.x`/`3.12.x` (the latest of that line, which the image tag also means);
-  nil otherwise (ranges, expressions, lists)."
+  `20.x`/`3.12.x` (the latest of that line, which the image tag also means),
+  or a whole Variable reference `${X}` (a Matrix Variable, whose values
+  the Source reader checks one by one); nil otherwise (ranges,
+  expressions, lists)."
   [version]
   (let [v (str/trim (str version))]
     (or (re-matches #"\d+(?:\.\d+){0,2}" v)
+        (re-matches #"\$\{[A-Za-z0-9_]+\}" v)
         (second (re-matches #"(\d+(?:\.\d+)?)\.x" v)))))
 
 (def ^:private by-hand-cache-hint

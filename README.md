@@ -24,6 +24,8 @@ Repositories, issues and pull requests are out of scope; GitLab's built-in GitHu
 | Workflow / Job `env:` | Pipeline / Job `variables` |
 | Step `env:` | Job `variables`, when every Step agrees on the value or the Job already has it; a Gap otherwise (ADR-0007) |
 | `${{ env.X }}`, `${{ secrets.X }}` in commands and `env:` | `${X}`, plus one Gap per Secret to create it as a masked Variable |
+| `strategy.matrix` | the Job's `parallel: matrix`, one Variable per dimension (`node-version` → `node_version`); `include`, `exclude`, `max-parallel` and `fail-fast` other than `false` are Gaps (ADR-0009) |
+| `${{ matrix.x }}` in commands, `env:` and Action inputs | `${x}`, so `node-version: ${{ matrix.node }}` gives the image `node:${node}`; a value the image tag can't follow (`lts/*`) is a Gap |
 | `needs:` | the Job's `needs:`, plus derived `stages` (`stage-1`, `stage-2`, …) so every Job runs after the Jobs it needs |
 | `actions/checkout` | dropped: GitLab checks out the repository itself |
 | `actions/setup-node`, `setup-python`, `setup-java` | the Job's `image` (`node:20`, `python:3.12`, `eclipse-temurin:21`, …), overriding the Runner Mapping image |
@@ -138,7 +140,7 @@ with this Migration Report:
 
 Each Job's `runs-on` label is translated to a GitLab image and runner tags. Built-in Runner Mappings cover `ubuntu-latest`, `ubuntu-24.04`, `ubuntu-22.04` and `ubuntu-20.04` (the matching `ubuntu:` image, no tags). Any other `ubuntu-*` label uses the Ubuntu version in the label (`ubuntu-22.04-arm` → `ubuntu:22.04`), or the `ubuntu-latest` image when it names none (`ubuntu-latest-4-cores` → `ubuntu:24.04`), with no tags.
 
-A label with no Runner Mapping (such as `macos-latest` or a self-hosted label) leaves the Job without an image and becomes a Gap. A `runs-on` list of several labels is looked up as one label joined with `, ` (e.g. `self-hosted, linux`), and a runner group as `group: big, labels: [linux, x64]`. A `runs-on` expression such as `${{ matrix.os }}` is a Gap to resolve by hand. An image set by a setup Action still wins over the Runner Mapping image.
+A label with no Runner Mapping (such as `macos-latest` or a self-hosted label) leaves the Job without an image and becomes a Gap. A `runs-on` list of several labels is looked up as one label joined with `, ` (e.g. `self-hosted, linux`), and a runner group as `group: big, labels: [linux, x64]`. A `runs-on` expression is a Gap to resolve by hand; for `${{ matrix.os }}` the Gap names the Matrix values, and the Job gets no Runner Mapping. An image set by a setup Action still wins over the Runner Mapping image.
 
 ### Migration Config
 
@@ -159,8 +161,8 @@ clojure -M:run --config migration.edn path/to/github-clone path/to/output
 ### Current limits
 
 - The clone must contain exactly one Workflow under `.github/workflows/` (#10).
-- Not converted yet: Matrices (#8), and `if:` conditions on Jobs and Steps (#9, #17). A Step's `if:` is ignored without a Gap.
-- `${{ secrets.X }}` and `${{ env.X }}` are rewritten only as whole expressions in commands and `env:` values; inside larger expressions or Action `with:` inputs they are left as they are (#9). A rewritten reference inside single quotes in a command no longer expands, and `shell:` other than the default is not considered.
+- Not converted yet: `if:` conditions on Jobs and Steps (#9, #17). A Step's `if:` is ignored without a Gap.
+- `${{ secrets.X }}`, `${{ env.X }}` and `${{ matrix.x }}` are rewritten only as whole expressions in commands and `env:` values (and `${{ matrix.x }}` in Action inputs); inside larger expressions, or `env`/`secrets` in Action `with:` inputs, they are left as they are (#9). A rewritten reference inside single quotes in a command no longer expands, and `shell:` other than the default is not considered.
 - `cache: pnpm` and `cache: sbt` on setup Actions, and cache paths outside the project, have no faithful GitLab form, so they become Gaps. `restore-keys` is dropped with a note in the Action's outcome.
 - Generated settings follow current GitLab (for example, up to 10 files in `cache:key:files`). Older self-managed instances may need adjustments.
 
@@ -191,7 +193,8 @@ Conversion always goes Source → CI Model → Target (ADR-0001). The code still
 - `gha-to-gitlab.runner-mapping`: applies Runner Mappings to the CI Model's Jobs
 - `gha-to-gitlab.action-job-settings`: Action Job settings (image, cache, artifacts, Variables): settles them per Job (the earliest Action wins, GitLab limits, conflict Gaps) and applies them after the Runner Mapping (ADR-0002)
 - `gha-to-gitlab.triggers`: Triggers as GitLab workflow rules (glob → regex, filter order) and Trigger Gaps
-- `gha-to-gitlab.variables`: `env:` as Variables (lifting a Step's into its Job), `${{ env.X }}`/`${{ secrets.X }}` rewriting and Secret Gaps
+- `gha-to-gitlab.matrix`: Matrices as GitLab parallel matrices, Matrix Gaps, and Action inputs checked per Matrix value
+- `gha-to-gitlab.variables`: `env:` as Variables (lifting a Step's into its Job), `${{ env.X }}`/`${{ secrets.X }}`/`${{ matrix.x }}` rewriting and Secret Gaps
 - `gha-to-gitlab.config`: reads and validates the optional Migration Config
 - `gha-to-gitlab.gitlab`: writes the CI Model as `.gitlab-ci.yml`
 - `gha-to-gitlab.report`: renders the Migration Report
