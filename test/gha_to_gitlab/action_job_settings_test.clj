@@ -59,7 +59,7 @@
 (deftest own-variables-test
   (let [{:keys [settings results]}
         (action-job-settings/settle
-         {:variables {"npm_config_cache" "/cache" "A" "1"}}
+         {"npm_config_cache" "/cache" "A" "1"}
          [(request "Node" "actions/setup-node@v4" {:variables {"npm_config_cache" "$CI_PROJECT_DIR/.npm"}})
           (request "Same" "acme/env@v1" {:variables {"A" "1" "B" "2"}})])]
     (testing "an Action's Variable that the Job's own env: sets differently is left out; the settled settings exclude the Job's own"

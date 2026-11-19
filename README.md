@@ -19,7 +19,7 @@ Repositories, issues and pull requests are out of scope; GitLab's built-in GitHu
 | `run:` Step | a script line |
 | `runs-on` | the Job's `image` and runner `tags` (Runner Mapping) |
 | Workflow / Job `env:` | Pipeline / Job `variables` |
-| Step `env:` | Job `variables`, when no other value of the name is lost; a Gap otherwise |
+| Step `env:` | Job `variables`, when every Step agrees on the value or the Job already has it; a Gap otherwise (ADR-0007) |
 | `${{ env.X }}`, `${{ secrets.X }}` in commands and `env:` | `${X}`, plus one Gap per Secret to create it as a masked Variable |
 | `needs:` | the Job's `needs:`, plus derived `stages` (`stage-1`, `stage-2`, …) so every Job runs after the Jobs it needs |
 | `actions/checkout` | dropped: GitLab checks out the repository itself |
@@ -157,6 +157,7 @@ clojure -M:run --config migration.edn path/to/github-clone path/to/output
 
 - The clone must contain exactly one Workflow under `.github/workflows/` (#10).
 - Not converted yet: Triggers (#7), Matrices (#8), and `if:` conditions on Jobs and Steps (#9, #17). A Step's `if:` is ignored without a Gap.
+- `${{ secrets.X }}` and `${{ env.X }}` are rewritten only as whole expressions in commands and `env:` values; inside larger expressions or Action `with:` inputs they are left as they are (#9). A rewritten reference inside single quotes in a command no longer expands, and `shell:` other than the default is not considered.
 - `cache: pnpm` and `cache: sbt` on setup Actions, and cache paths outside the project, have no faithful GitLab form, so they become Gaps. `restore-keys` is dropped with a note in the Action's outcome.
 - Generated settings follow current GitLab (for example, up to 10 files in `cache:key:files`). Older self-managed instances may need adjustments.
 

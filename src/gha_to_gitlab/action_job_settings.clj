@@ -50,19 +50,18 @@
 (defn- add-setting
   "What happens when an Action asks for setting `k` = `v` on top of the
   `settings` settled so far (`set-by`: setting → the request that set it)
-  and the Job's `own` settings from `env:`, which a map setting's entries
-  may not contradict:
-  `{:value v'}` is the setting's new value, or `{:gap ..}` when the Job
-  keeps the old one."
-  [own settings set-by k v]
+  and the Variables the Job has from `env:`, which an Action's `:variables`
+  may not contradict: `{:value v'}` is the setting's new value, or
+  `{:gap ..}` when the Job keeps the old one."
+  [env-variables settings set-by k v]
   (let [old (get settings k)
-        own-clashes (when (map-settings k) (clashes (get own k) v))]
+        env-clashes (when (= :variables k) (clashes env-variables v))]
     (if-let [limit (list-settings k)]
       (if (< limit (+ (count old) (count v)))
         {:gap (too-many-gap k limit)}
         {:value (into (vec old) v)})
       (cond
-        (seq own-clashes) {:gap (conflict-gap k own-clashes nil (select-keys (get own k) (keys own-clashes)))}
+        (seq env-clashes) {:gap (conflict-gap k env-clashes nil (select-keys env-variables (keys env-clashes)))}
         (not (contains? settings k)) {:value v}
         (map-settings k)
         (let [action-clashes (clashes old v)]
@@ -73,11 +72,12 @@
         :else {:gap (conflict-gap k v (get set-by k) old)}))))
 
 (defn settle
-  "Settles one Job's Action Job settings. `own` are the settings the Job
-  has from the Source itself, such as the `:variables` its `env:` gives it
-  (none when left out): an Action's map-setting entry that contradicts one
-  of them is left out with a Gap, and they are not part of the returned
-  settings. `requests` are the Job's Steps in order, each `{:step label :action uses-value :settings {setting value}}`
+  "Settles one Job's Action Job settings. `env-variables` are the Variables
+  the Job has from `env:` (Workflow, Job and lifted Step entries; none when
+  left out): an Action's `:variables` that contradict one of them are left
+  out with a Gap, so the Source's own values win, and they are not part of
+  the returned settings. `requests` are the Job's Steps in order, each
+  `{:step label :action uses-value :settings {setting value}}`
   (`:settings` may be empty). The earliest Action to set a setting wins, and
   a later Action asking for a different value gets a Gap; a list setting
   (`list-settings`, such as `:cache`) collects every Action's entries up to
@@ -87,9 +87,9 @@
   the settings the Job kept from it and the Gaps it raised (their messages
   continue a sentence that names the Step and Action)."
   ([requests] (settle {} requests))
-  ([own requests]
+  ([env-variables requests]
    (-> (reduce (fn [{:keys [settings set-by] :as acc} {:keys [step action] :as request}]
-                 (let [outcomes (for [[k v] (:settings request)] [k (add-setting own settings set-by k v)])
+                 (let [outcomes (for [[k v] (:settings request)] [k (add-setting env-variables settings set-by k v)])
                        kept (vec (for [[k {:keys [gap]}] outcomes :when (not gap)] k))]
                    (-> acc
                        (update :results conj {:kept kept :gaps (into [] (keep (comp :gap second)) outcomes)})

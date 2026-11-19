@@ -34,23 +34,56 @@
        "jobs:\n  build:\n"
        "    env:\n      MODE: fast\n"
        "    steps:\n"
-       "      - name: Build\n        run: make\n        env:\n          TARGET: web\n          MODE: fast\n          REGION: eu\n"
-       "      - name: Test\n        run: make test\n        env:\n          TARGET: web\n          LEVEL: 1\n"
-       "      - name: Lint\n        run: make lint\n        env:\n          LEVEL: 2\n          MODE: slow\n"
-       "      - name: Ship\n        run: make ship\n        env:\n          REGION: us\n"))
+       "      - name: Build\n        run: make\n        env:\n          TARGET: web\n          MODE: fast\n          REGION: eu\n          SHARED: 1\n"
+       "      - name: Test\n        run: make test\n        env:\n          TARGET: web\n          LEVEL: 1\n          SHARED: 1\n"
+       "      - name: Lint\n        uses: acme/lint@v1\n        env:\n          LEVEL: 2\n          MODE: slow\n          SHARED: 1\n"
+       "      - name: Ship\n        run: make ship\n        env:\n          REGION: us\n          SHARED: 1\n"))
+
+(defn- step-env-gap [step text]
+  (str "Workflow `.github/workflows/ci.yml`, Job `build`, Step `" step "`: its `env:` sets " text
+       "; a GitLab Job's Variables reach all its script lines, so set it for this Step's lines by hand."))
 
 (deftest step-env-test
-  (testing "a Step's env: entry is lifted into the Job when no other level or Step gives the name another value"
+  (testing "a Step's env: entry is lifted into the Job only when every Step sets the name to the same value"
     (is (= {"variables" {"REGION" "eu"}
-            "build" {"variables" {"MODE" "fast" "TARGET" "web"}
-                     "script" ["make" "make test" "make lint" "make ship"]}}
+            "build" {"variables" {"MODE" "fast" "SHARED" "1"}
+                     "script" ["make" "make test"
+                               "echo 'Gap: Action acme/lint@v1 was not converted; see MIGRATION_REPORT.md'"
+                               "make ship"]}}
            (ci-file step-env-workflow))))
-  (testing "an entry that conflicts with another Step, the Job's env: or the Workflow's env: is a Gap at its Step"
-    (is (= ["Workflow `.github/workflows/ci.yml`, Job `build`, Step `Test`: its `env:` sets `LEVEL` to `1`, but Step `Lint` sets it to `2`; a GitLab Job has one value per Variable, so set it for this Step's script lines by hand."
-            "Workflow `.github/workflows/ci.yml`, Job `build`, Step `Lint`: its `env:` sets `LEVEL` to `2`, but Step `Test` sets it to `1`; a GitLab Job has one value per Variable, so set it for this Step's script lines by hand."
-            "Workflow `.github/workflows/ci.yml`, Job `build`, Step `Lint`: its `env:` sets `MODE` to `slow`, but the Job's `env:` sets it to `fast`; a GitLab Job has one value per Variable, so set it for this Step's script lines by hand."
-            "Workflow `.github/workflows/ci.yml`, Job `build`, Step `Ship`: its `env:` sets `REGION` to `us`, but the Workflow's `env:` sets it to `eu`; a GitLab Job has one value per Variable, so set it for this Step's script lines by hand."]
-           (gap-messages step-env-workflow)))))
+  (testing "an entry the Job already inherits with the same value is no Gap; any other entry is a Gap at its Step"
+    (is (= [(step-env-gap "Build" "`TARGET` to `web`, but Step `Lint` does not set it")
+            (step-env-gap "Test" "`LEVEL` to `1`, but Step `Lint` sets it to `2`")
+            (step-env-gap "Test" "`TARGET` to `web`, but Step `Lint` does not set it")
+            (step-env-gap "Lint" "`LEVEL` to `2`, but Step `Test` sets it to `1`")
+            (step-env-gap "Lint" "`MODE` to `slow`, but the Job's `env:` sets it to `fast`")
+            (step-env-gap "Ship" "`REGION` to `us`, but the Workflow's `env:` sets it to `eu`")]
+           (remove #(str/includes? % "acme/lint") (gap-messages step-env-workflow))))))
+
+(deftest env-values-test
+  (testing "env: values are the text GitHub reads (YAML 1.2): numbers in canonical form, other plain scalars as written"
+    (is (= {"variables" {"BOOL" "true" "DATE" "2024-01-01" "EMPTY" "" "FLOAT" "3.1" "INT" "10"
+                         "QUOTED" "010" "TIME" "1:30" "YES" "yes"}
+            "b" {"script" ["make"]}}
+           (ci-file (str "on: push\nenv:\n  INT: 010\n  QUOTED: '010'\n  FLOAT: 3.10\n  BOOL: True\n"
+                         "  YES: yes\n  DATE: 2024-01-01\n  TIME: 1:30\n  EMPTY:\n"
+                         "jobs:\n  b:\n    steps:\n      - run: make\n")))))
+  (testing "a literal `$` in an env: value is escaped, as GitLab expands Variables in Variable values"
+    (is (= {"P" "pa$$$$word ${TOKEN} $${{ github.sha }}"}
+           (get (ci-file (str "on: push\nenv:\n  P: pa$$word ${{ secrets.TOKEN }} ${{ github.sha }}\n"
+                              "jobs:\n  b:\n    steps:\n      - run: make\n"))
+                "variables")))))
+
+(deftest expression-env-test
+  (testing "an env: that is an expression, not a map, is a Gap at its level and the Migration Run goes on"
+    (let [{:keys [model]} (convert-workflow (str "on: push\nenv: ${{ fromJSON(vars.ENV) }}\n"
+                                                 "jobs:\n  b:\n    env: ${{ fromJSON(vars.JOB) }}\n    steps:\n"
+                                                 "      - run: make\n        env: ${{ fromJSON(vars.STEP) }}\n"))]
+      (is (= ["Workflow `.github/workflows/ci.yml`: its `env:` is the expression `${{ fromJSON(vars.ENV) }}`, not a list of Variables; set its Variables by hand."
+              "Workflow `.github/workflows/ci.yml`, Job `b`: its `env:` is the expression `${{ fromJSON(vars.JOB) }}`, not a list of Variables; set its Variables by hand."
+              "Workflow `.github/workflows/ci.yml`, Job `b`, Step `step 1`: its `env:` is the expression `${{ fromJSON(vars.STEP) }}`, not a list of Variables; set its Variables by hand."]
+             (mapv :message (:gaps model))))
+      (is (= [{:id "b" :workflow ".github/workflows/ci.yml" :script ["make"]}] (:jobs model))))))
 
 (deftest reference-rewriting-test
   (testing "env and secrets references in commands and env: values become Variable references; other expressions stay"
@@ -82,7 +115,7 @@
               {:workflow ".github/workflows/ci.yml"
                :secret "GITHUB_TOKEN"
                :message "Workflow `.github/workflows/ci.yml`: Secret `GITHUB_TOKEN`, used by Job `build`, is the token GitHub creates for each run, and GitLab has none by that name; create a masked Variable `GITHUB_TOKEN` on the Target holding a GitHub token with the access the Jobs need, or switch them to `CI_JOB_TOKEN`."}]
-             (:gaps model))))
+             (filter :secret (:gaps model)))))
     (testing "the Migration Report lists each Secret once"
       (is (= 1 (count (re-seq #"Secret `NPM_TOKEN`" report)))))))
 
