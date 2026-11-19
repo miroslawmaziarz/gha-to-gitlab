@@ -8,26 +8,29 @@
 
 (def ^:private location-keys
   "The keys of a Gap's location, from the widest place to the narrowest;
-  `:secret` names the Secret a Gap is about."
-  [:workflow :job :step :action :input :secret])
+  `:trigger` and `:secret` name the Trigger or Secret of a Workflow a Gap
+  is about."
+  [:workflow :trigger :secret :job :step :action :input])
 
 (defn- prefix
   "The start of a Gap message naming its location, e.g. \"Workflow `ci.yml`,
-  Job `build`, Step `Checkout`: Action `actions/checkout@v4` \"."
-  [{:keys [workflow job step action]}]
+  Job `build`, Step `Checkout`: Action `actions/checkout@v4` \" or
+  \"Workflow `ci.yml`: Trigger `push` \"."
+  [{:keys [workflow trigger job step action]}]
   (let [places (cond-> []
                  workflow (conj (str "Workflow `" workflow "`"))
                  job (conj (str "Job `" job "`"))
                  step (conj (str "Step `" step "`")))]
     (str (when (seq places) (str (str/join ", " places) ": "))
+         (when trigger (str "Trigger `" trigger "` "))
          (when action (str "Action `" action "` ")))))
 
 (defn at
-  "The Gap at `location` (any of `:workflow`, `:job`, `:step`, `:action`,
-  `:input`, the Action input it is about, and `:secret`) with `text`, what went wrong
-  and what a person should do. Its `:message` names the location first;
-  with an `:action`, `text` continues a sentence about the Action (\"has no
-  Action Translator; ...\"). Absent location keys are left out."
+  "The Gap at `location` (any of `:workflow`, `:trigger`, `:secret`, `:job`,
+  `:step`, `:action`, and `:input`, the Action input it is about) with
+  `text`, what went wrong and what a person should do. Its `:message`
+  names the location first; with a `:trigger` or an `:action`, `text`
+  continues a sentence about it (\"has no Action Translator; ...\"). Absent location keys are left out."
   [location text]
   (let [location (into {} (filter (comp some? val)) (select-keys location location-keys))]
     (assoc location :message (str (prefix location) text))))

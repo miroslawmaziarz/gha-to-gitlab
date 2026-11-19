@@ -12,6 +12,12 @@
   ([workflow-yaml config]
    (migration/convert {:workflows {".github/workflows/ci.yml" workflow-yaml} :config config})))
 
+(defn- ci-file-jobs
+  "The CI file `gitlab-ci-yaml` as data without its `workflow:` rules, which
+  `triggers-test` covers."
+  [gitlab-ci-yaml]
+  (dissoc (yaml/parse-string gitlab-ci-yaml) :workflow))
+
 (defn- run-and-read!
   "Runs `migration/run!` against a clone, either a folder or a map of
   Workflow path → YAML text written to a fresh one, and returns the texts of
@@ -35,7 +41,7 @@
       (is (= {:build {:image "ubuntu:24.04" :script ["npm ci" "npm run build"]}
               :test {:image "ubuntu:24.04" :script ["npm ci" "npm test\nnpm run coverage\n"]}
               :lint {:image "ubuntu:24.04" :script ["npm run lint"]}}
-             (yaml/parse-string gitlab-ci-yaml))))
+             (ci-file-jobs gitlab-ci-yaml))))
     (testing "writes a Migration Report listing the converted Workflow and Jobs and no Gaps"
       (is (str/includes? report ".github/workflows/ci.yml"))
       (doseq [job ["build" "test" "lint"]]
@@ -61,7 +67,7 @@
                        :script ["echo 'Gap: Action acme/login@v1 was not converted; see MIGRATION_REPORT.md'"
                                 "make deploy"
                                 "echo 'Gap: Action acme/notify@v3 was not converted; see MIGRATION_REPORT.md'"]}}
-             (yaml/parse-string gitlab-ci-yaml))))
+             (ci-file-jobs gitlab-ci-yaml))))
     (testing "the Migration Report names the Workflow file it read, shows the Gap count and lists each Gap"
       (is (str/includes? report "Workflow `.github/workflows/deploy.yml` became `.gitlab-ci.yml`"))
       (is (str/includes? report "2 Gaps need a person to finish them:"))
@@ -72,7 +78,7 @@
   (let [{:keys [gitlab-ci-yaml report]} (convert-workflow "on: push\njobs:\n  mac:\n    runs-on: macos-latest\n    steps:\n      - run: xcodebuild\n")]
     (testing "the Job is still written, without an image"
       (is (= {:mac {:script ["xcodebuild"]}}
-             (yaml/parse-string gitlab-ci-yaml))))
+             (ci-file-jobs gitlab-ci-yaml))))
     (testing "the Migration Report shows the Job has no Runner Mapping and lists the Gap"
       (is (str/includes? report "- `mac`: 1 script line; runs on `macos-latest` → no Runner Mapping (see Gaps)"))
       (is (str/includes? report "- Workflow `.github/workflows/ci.yml`, Job `mac`: runs on `macos-latest`, which has no Runner Mapping")))))
@@ -109,7 +115,7 @@
     (testing "the setup Action's image replaces the Runner Mapping image for its Job only"
       (is (= {:build {:image "node:20" :script ["npm test"]}
               :lint {:image "ubuntu:24.04" :script ["make lint"]}}
-             (yaml/parse-string gitlab-ci-yaml))))
+             (ci-file-jobs gitlab-ci-yaml))))
     (testing "the Migration Report's Job line shows the override and where it came from"
       (is (str/includes? report
                          (str "- `build`: 1 script line; runs on `ubuntu-latest` → image `node:20` from Step `Node` "
@@ -154,7 +160,8 @@
               "      - name: Upload\n        uses: actions/upload-artifact@v4\n        with:\n"
               "          name: dist\n          path: dist/\n          retention-days: 7\n          include-hidden-files: true\n"))]
     (testing "the setup Action's cache, actions/cache and actions/upload-artifact become the Job's variables, caches and artifacts"
-      (is (= (str "web:\n"
+      (is (= (str "workflow:\n  rules:\n  - if: $CI_PIPELINE_SOURCE == \"push\"\n"
+                  "web:\n"
                   "  image: node:20\n"
                   "  variables:\n    npm_config_cache: $CI_PROJECT_DIR/.npm\n"
                   "  cache:\n"
@@ -183,7 +190,7 @@
               :build {:stage "stage-1" :image "ubuntu:24.04" :script ["make"]}
               :test {:stage "stage-2" :needs ["build"] :image "ubuntu:24.04" :script ["make test"]}
               :deploy {:stage "stage-3" :needs ["test"] :image "ubuntu:24.04" :script ["make deploy"]}}
-             (yaml/parse-string gitlab-ci-yaml))))
+             (ci-file-jobs gitlab-ci-yaml))))
     (testing "the Migration Report shows each Job's Stage and the Jobs it waits for, and the missing Job as a Gap"
       (is (str/includes? report "- `build`: 1 script line; runs on `ubuntu-latest` → image `ubuntu:24.04`, no tags; Stage `stage-1`\n"))
       (is (str/includes? report "- `deploy`: 1 script line; runs on `ubuntu-latest` → image `ubuntu:24.04`, no tags; Stage `stage-3`, after `test`\n"))
@@ -203,7 +210,7 @@
              (mapv #(dissoc % :actions) (:jobs model)))))
     (testing "and the .gitlab-ci.yml text, where the Action's image replaces the Runner Mapping image and the tags stay"
       (is (= {:build {:image "node:20" :tags ["docker"] :script ["npm test"]}}
-             (yaml/parse-string gitlab-ci-yaml))))
+             (ci-file-jobs gitlab-ci-yaml))))
     (testing "and the Migration Report text, naming the Workflow it converted"
       (is (str/includes? report "Workflow `.github/workflows/ci.yml` became `.gitlab-ci.yml`")))))
 
@@ -212,7 +219,7 @@
     (is (= {:build {:image "node:22" :script ["make"]}}
            (-> (convert-workflow "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n"
                                  {:runner-mappings {"ubuntu-latest" {:image "node:22"}}})
-               :gitlab-ci-yaml yaml/parse-string))))
+               :gitlab-ci-yaml ci-file-jobs))))
   (testing "an invalid Migration Config is refused, naming the problem"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid Migration Config.*image"
           (convert-workflow "on: push\njobs:\n  b:\n    runs-on: x\n    steps:\n      - run: make\n"
