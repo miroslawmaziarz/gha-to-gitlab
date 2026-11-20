@@ -53,7 +53,9 @@
    [:paths [:vector {:min 1} :string]]
    [:exclude {:optional true} [:vector {:min 1} :string]]
    ;; how long GitLab keeps them, e.g. "5 days"; missing: the instance default
-   [:expire-in {:optional true} [:string {:min 1}]]])
+   [:expire-in {:optional true} [:string {:min 1}]]
+   ;; keep them even when the Job fails, or only then; missing: on success
+   [:when {:optional true} [:enum "always" "on_failure"]]])
 
 (def Variables
   "Variables, name → value."
@@ -83,6 +85,17 @@
    [:fn {:error/message (str "a parallel matrix makes at most " jobs-per-matrix-limit " Jobs")}
     #(<= (matrix-jobs %) jobs-per-matrix-limit)]])
 
+(def JobRule
+  "A Job's GitLab rule (ADR-0010): the Job is in a Pipeline whose
+  Variables match `:if` (missing: every Pipeline), and runs `:when` it
+  says (missing: when the Jobs before it succeeded; `never`: not at
+  all)."
+  [:and
+   [:map {:closed true}
+    [:if {:optional true} [:string {:min 1}]]
+    [:when {:optional true} [:enum "always" "on_failure" "never"]]]
+   [:fn {:error/message "a rule needs :if or :when"} seq]])
+
 (def Job
   "One Job: its id, the Jobs it needs, where it runs (runner label, image,
   tags), its settings and script lines, and the Actions it converted."
@@ -93,6 +106,12 @@
    [:runs-on {:optional true} :string]
    ;; ids of the Jobs this Job runs after, in Source order
    [:needs {:optional true} [:vector {:min 1} [:string {:min 1}]]]
+   ;; the needed Jobs it runs after only when they are in the Pipeline
+   ;; (ADR-0010)
+   [:optional-needs {:optional true} [:vector {:min 1} [:string {:min 1}]]]
+   ;; when the Job is in a Pipeline and when it runs; missing: always,
+   ;; after the Jobs before it succeeded
+   [:rules {:optional true} [:vector {:min 1} JobRule]]
    ;; the Job's Matrix: it runs once per combination
    [:matrix {:optional true} Matrix]
    [:image {:optional true} [:string {:min 1}]]

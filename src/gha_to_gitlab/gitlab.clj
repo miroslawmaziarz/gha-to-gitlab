@@ -45,13 +45,18 @@
             [:key :paths :policy :when]))
 
 (defn- gitlab-job
-  "One GitLab Job, its keys in reading order: when it runs (stage, needs),
+  "One GitLab Job, its keys in reading order: when it runs (stage, rules,
+  needs),
   how many times (parallel matrix), where it runs (image, tags), its environment (variables), what it
   restores (cache), what it runs (script), then what it keeps (artifacts)."
-  [stage {:keys [needs matrix image tags variables script cache artifacts]}]
+  [stage {:keys [rules needs optional-needs matrix image tags variables script cache artifacts]}]
   (cond-> (ordered-map)
     stage (assoc :stage stage)
-    (seq needs) (assoc :needs (mapv job-name needs))
+    (seq rules) (assoc :rules (mapv #(in-order % [:if :when]) rules))
+    (seq needs) (assoc :needs (mapv #(if (some #{%} optional-needs)
+                                       (ordered-map :job (job-name %) :optional true)
+                                       (job-name %))
+                                    needs))
     matrix (assoc :parallel {:matrix matrix})
     image (assoc :image image)
     (seq tags) (assoc :tags tags)
@@ -59,7 +64,7 @@
     (= 1 (count cache)) (assoc :cache (gitlab-cache (first cache)))
     (< 1 (count cache)) (assoc :cache (mapv gitlab-cache cache))
     true (assoc :script script)
-    artifacts (assoc :artifacts (in-order artifacts [:name :paths :exclude :expire-in]
+    artifacts (assoc :artifacts (in-order artifacts [:name :paths :exclude :expire-in :when]
                                           {:expire-in :expire_in}))))
 
 (defn- ci-model->ci-file-map

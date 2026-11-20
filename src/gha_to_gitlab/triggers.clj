@@ -6,17 +6,6 @@
             [gha-to-gitlab.gap :as gap]
             [gha-to-gitlab.wording :as wording]))
 
-(def ^:private regex-operators
-  "The characters that mean something in a GitLab (RE2) regex literal,
-  plus `/`, which ends the literal."
-  (set "\\.^$|?*+()[]{}/"))
-
-(defn- literal
-  "Character `c` as it matches itself in a GitLab regex: regex operators
-  and `/`, which ends the regex, are escaped."
-  [c]
-  (if (regex-operators c) (str "\\" c) (str c)))
-
 (defn- class-token
   "The token of character class `[inside]`: `[:atom regex]`, or `[:gap
   reason]` when GitHub's meaning is unsure (a leading `^`) or the class
@@ -36,7 +25,7 @@
   (loop [cs (seq glob) tokens []]
     (if-let [[c & more] cs]
       (case c
-        \\ (recur (rest more) (conj tokens [:atom (literal (or (first more) \\))]))
+        \\ (recur (rest more) (conj tokens [:atom (wording/regex-literal (str (or (first more) \\)))]))
         \* (if (= \* (first more))
              (recur (rest more) (conj tokens [:wildcard ".*"]))
              (recur more (conj tokens [:wildcard "[^\\/]*"])))
@@ -45,7 +34,7 @@
              (if (seq after)
                (recur (rest after) (conj tokens (class-token inside)))
                [[:gap "`[` has no closing `]`"]]))
-        (recur more (conj tokens [:atom (literal c)])))
+        (recur more (conj tokens [:atom (wording/regex-literal (str c))])))
       tokens)))
 
 (defn glob->regex
@@ -66,21 +55,23 @@
               (map vector (cons nil tokens) tokens))
         {:regex (str "/^" (str/join (map second tokens)) "$/")})))
 
-(def ^:private push-source
-  "The rule condition of Pipelines started by a push."
-  "$CI_PIPELINE_SOURCE == \"push\"")
+(def pipeline-sources
+  "GitHub Trigger name → the GitLab Pipeline source (`$CI_PIPELINE_SOURCE`)
+  of the Pipelines it becomes, for the Triggers that get a rule."
+  {"push" "push"
+   "pull_request" "merge_request_event"
+   "schedule" "schedule"
+   "workflow_dispatch" "web"})
 
-(def ^:private merge-request-source
-  "The rule condition of merge request Pipelines."
-  "$CI_PIPELINE_SOURCE == \"merge_request_event\"")
+(defn- source-condition
+  "The rule condition of the Pipelines Trigger `trigger` becomes."
+  [trigger]
+  (str "$CI_PIPELINE_SOURCE == \"" (pipeline-sources trigger) "\""))
 
-(def ^:private schedule-source
-  "The rule condition of Pipelines a Pipeline Schedule starts."
-  "$CI_PIPELINE_SOURCE == \"schedule\"")
-
-(def ^:private web-source
-  "The rule condition of Pipelines started with Run pipeline."
-  "$CI_PIPELINE_SOURCE == \"web\"")
+(def ^:private push-source (source-condition "push"))
+(def ^:private merge-request-source (source-condition "pull_request"))
+(def ^:private schedule-source (source-condition "schedule"))
+(def ^:private web-source (source-condition "workflow_dispatch"))
 
 (defn- trigger-gap
   "The Gap at Trigger `trigger` of the Workflow at `workflow-path`."
